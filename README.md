@@ -1,9 +1,11 @@
 # llm.🔥
-A port of Andrej Karpathy's [llm.c](https://github.com/karpathy/llm.c) to [Mojo](https://docs.modular.com/mojo). This is an alpha version and will be improved over time.
+# llm.🔥
+This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/llm.c) to [Mojo](https://docs.modular.com/mojo), currently in alpha. It is under active development and subject to significant changes. Users should expect to encounter bugs and unfinished features. At this stage, it is not recommended for use as the basis for your own projects.
+
 
 ## Implementation
 
-- **train_gpt_basic.mojo**: Basic port of `train_gpt.c` to Mojo. Does not yet leverage Mojo's capabilities.
+- **train_gpt_basic.mojo**: Basic port of `train_gpt.c` to Mojo. Does not leverage Mojo's capabilities.
 - **train_gpt.mojo**: Enhanced version utilizing Mojo's performance gems like vectorization and parallelization. Work in progress.
 
 ## How to Use
