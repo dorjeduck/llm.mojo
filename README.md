@@ -29,6 +29,7 @@ Preliminary benchmark results:
 ## Development Roadmap
 
 - **Implementation Improvement**: Enhance `train_gpt.mojo` to fully exploit Mojo's capabilities, including further optimization for speed and efficiency.
+- **Port test_gpt2.c to Mojo**: Coming soon
 - **Following Changes of llm.c**: Regularly update the Mojo port to align with the latest improvements and changes made to `llm.c`.
 - **Solid Benchmarks**: Develop comprehensive and reliable benchmarks to accurately measure performance improvements and compare them against other implementations.
 
