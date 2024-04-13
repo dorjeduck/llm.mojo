@@ -19,10 +19,10 @@ Preliminary benchmark results:
 
 | Implementation             | Average Training Loop Time |
 |----------------------------|----------------------------|
-| train_gpt.c (with OpenMP)  | 2119 ms                    |
-| train_gpt.mojo             | 2346 ms                    |
-| train_gpt.c  (no OpenMP)   | 7473 ms                    |
-| train_gpt_basic.mojo       | 54509 ms                   |
+| train_gpt2.c (with OpenMP)  | 2119 ms                    |
+| train_gpt2.mojo             | 2346 ms                    |
+| train_gpt2.c  (no OpenMP)   | 7473 ms                    |
+| train_gpt2_basic.mojo       | 54509 ms                   |
 
 !['Training Loop Times'](imgs/training_loop_times_chart.png)
 
