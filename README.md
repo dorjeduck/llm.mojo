@@ -1,5 +1,5 @@
 # llm.🔥
-# llm.🔥
+
 This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/llm.c) to [Mojo](https://docs.modular.com/mojo), currently in alpha. It is under active development and subject to significant changes. Users should expect to encounter bugs and unfinished features. At this stage, it is not recommended for use as the basis for your own projects.
 
 
