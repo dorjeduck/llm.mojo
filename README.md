@@ -15,7 +15,7 @@ This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/
 
 ## Benchmarks
 
-Preliminary benchmark results:
+Preliminary benchmark results: (M2 MacBook Pro)
 
 | Implementation             | Average Training Loop Time |
 |----------------------------|----------------------------|
