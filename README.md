@@ -67,7 +67,7 @@ Preliminary benchmark results: (M2 MacBook Pro)
 
 - 2024.04.15
   - Tokenizer Added - `train_gpt2.c` Update 2024.04.14
-  - Big fix `attention_backward`
+  - Bug fix `attention_backward`
 - 2024.04.13
   - Initial repository setup and commit.
 
