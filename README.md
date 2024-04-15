@@ -19,7 +19,7 @@ Use the [tinyshakespeare](https://raw.githubusercontent.com/karpathy/char-rnn/ma
 python prepro_tinyshakespeare.py
 ```
 
-(all Python script in this repo are from Andrej Karpathy's [llm.c]((https://github.com/karpathy/llm.c)) repository.)
+(all Python scripts in this repo are from Andrej Karpathy's [llm.c](https://github.com/karpathy/llm.c) repository.)
 
 Alternatively, download and tokenize the larger [TinyStories](https://huggingface.co/datasets/roneneldan/TinyStories) dataset with the following command:
 
@@ -62,6 +62,12 @@ Preliminary benchmark results: (M2 MacBook Pro)
 - **Port test_gpt2.c to Mojo**: Coming soon
 - **Following Changes of llm.c**: Regularly update the Mojo port to align with the latest improvements and changes made to `llm.c`.
 - **Solid Benchmarks**: Develop comprehensive and reliable benchmarks to accurately measure performance improvements and compare them against other implementations.
+
+## Changelog
+
+* 2024.04.13
+  * Initial repository setup and commit.
+
 
 ## License
 
