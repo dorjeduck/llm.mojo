@@ -33,7 +33,6 @@ fn encoder_forward(out:DTypePointer[dtype], inp:DTypePointer[dtype_int], wte:DTy
     
     @parameter
     fn _calc(b:Int):
-    #for b in range(B):
         for t in range(T):
             # seek to the output position in out[b,t,:]
             var out_bt:DTypePointer[dtype] = out + b * T * C + t * C
@@ -54,7 +53,6 @@ fn encoder_forward(out:DTypePointer[dtype], inp:DTypePointer[dtype_int], wte:DTy
 fn encoder_backward(dwte:DTypePointer[dtype], dwpe:DTypePointer[dtype],dout:DTypePointer[dtype], inp:DTypePointer[dtype_int],B:Int32,T:Int32,C:Int32):
     @parameter
     fn _calc(b:Int):
-    #for b in range(B):
         for t in range(T):
             var dout_bt:DTypePointer[dtype] = dout + b * T * C + t * C
             var ix:Int32 = inp[b * T + t]
@@ -101,14 +99,14 @@ fn layernorm_forward(inout out:DTypePointer[dtype], mean:DTypePointer[dtype], rs
             v = v/C.to_int()
            
             # calculate the rstd
-            var s:FLOAT = 1.0 * rsqrt(v + eps)
-
+            var s:FLOAT = 1.0 / sqrt(v + eps)
+           
             # seek to the output position in out[b,t,:]
             var out_bt:DTypePointer[dtype] = out + b * T * C + t * C
           
             @parameter
             fn _op3[width: Int](iv: Int):
-                var n = s * (x.load[width=width](iv) - m) # normalized output
+                var n = s * (x.load[width=width](iv) - m) # normalized output        
                 out_bt.store[width=width](iv, n * weight.load[width=width](iv) + bias.load[width=width](iv)) # scale and shift it        
             vectorize[_op3, SIMD_WIDTH](size=C.to_int())
            
@@ -184,7 +182,6 @@ fn matmul_forward( out:DTypePointer[dtype],
     
     @parameter
     fn _calc(b:Int):
-    #for b in range(B):
         for t in range(T):
             var out_bt:DTypePointer[dtype] = out + b * T * OC + t * OC
             var inp_bt:DTypePointer[dtype] = inp + b * T * C + t * C
@@ -216,7 +213,6 @@ fn matmul_backward( dinp:DTypePointer[dtype], dweight:DTypePointer[dtype], dbias
     
     @parameter
     fn _calc(b:Int):
-    #for b in range(B):
         for t in range(T):
             var dout_bt:DTypePointer[dtype] = dout + b * T * OC + t * OC
             var dinp_bt:DTypePointer[dtype] = dinp + b * T * C + t * C
@@ -235,7 +231,6 @@ fn matmul_backward( dinp:DTypePointer[dtype], dweight:DTypePointer[dtype], dbias
     
     @parameter
     fn _calc2(o:Int):
-    #for o in range(OC):
         for b in range(B):
             for t in range(T):
                 var dout_bt:DTypePointer[dtype] = dout + b * T * OC + t * OC
@@ -260,7 +255,7 @@ fn attention_forward( out:DTypePointer[dtype], preatt:DTypePointer[dtype], att:D
     # output is (B, T, C)
     var C3:Int32 = C*3
     var hs:Int32 = C / NH # head size
-    var scale:FLOAT = 1.0 * rsqrt(hs.cast[dtype]())
+    var scale:FLOAT = 1.0 / sqrt(hs.cast[dtype]())
 
     #pragma omp parallel for collapse(3)
     @parameter
@@ -303,9 +298,9 @@ fn attention_forward( out:DTypePointer[dtype], preatt:DTypePointer[dtype], att:D
                     att_bth.store[width=width](iv,expv)
                 vectorize[_op2, SIMD_WIDTH](size=t+1)
                 
-                var expsum_inv:FLOAT =  1.0 / expsum
-                if expsum == 0.0:
-                    expsum_inv = 0.0
+                var expsum_inv:FLOAT = 0.0
+                if expsum != 0.0:
+                    expsum_inv = 1.0 / expsum
 
                 # pass 3: normalize to get the softmax
                 for t2 in range(T):
@@ -318,10 +313,12 @@ fn attention_forward( out:DTypePointer[dtype], preatt:DTypePointer[dtype], att:D
                     
                 # pass 4: accumulate weighted values into the output of attention
                 var out_bth:DTypePointer[dtype] = out + b * T * C + t * C + h * hs
-                for i in range(hs): 
-                    out_bth[i] = 0.0 
+                #for i in range(hs): 
+                #    out_bth[i] = 0.0 
+                memset_zero(out_bth,hs.to_int())
+                
                 for t2 in range(t+1):
-                    var value_t2:DTypePointer[dtype] = inp + b * T * C3 + t2 * C3 + h * hs + C*2 # +C*2 because it's value
+                    var value_t2 = inp + b * T * C3 + t2 * C3 + h * hs + C*2 # +C*2 because it's value
                     var att_btht2:FLOAT = att_bth[t2]
  
                     @parameter
@@ -344,11 +341,10 @@ fn attention_backward( dinp:DTypePointer[dtype], dpreatt:DTypePointer[dtype], da
     # dout is (B, T, C)
     var C3:Int32 = C*3
     var hs:Int32 = C / NH # head size
-    var scale:FLOAT = 1.0 * rsqrt(hs.cast[dtype]())
+    var scale:FLOAT = 1.0 / sqrt(hs.cast[dtype]())
 
     @parameter
     fn _calc(b:Int):
-    #for b in range(B):
         for t in range(T):
             for h in range(NH):
                 var att_bth:DTypePointer[dtype] = att + b*NH*T*T + h*T*T + t*T
@@ -396,12 +392,16 @@ fn attention_backward( dinp:DTypePointer[dtype], dpreatt:DTypePointer[dtype], da
                         # preatt_bth[t2] += (query_t[i] * key_t2[i]) * scale
                         # so now we have:
                         dquery_t.store[width=width](iv,dquery_t.load[width=width](iv) + key_t2.load[width=width](iv) * dpreatt_bth[t2] * scale)
+                        dkey_t2.store[width=width](iv,dkey_t2.load[width=width](iv) + query_t.load[width=width](iv) * dpreatt_bth[t2] * scale)
+                        #????
+                    
                     vectorize[_op2, SIMD_WIDTH](size=hs.to_int())
     
     parallelize[_calc](B.to_int(),B.to_int())
                     
+
 fn gelu_forward( out:DTypePointer[dtype], inp:DTypePointer[dtype],N:Int32):
-    var s:FLOAT = sqrt(2.0 / M_PI)
+    var s:FLOAT  = sqrt(2.0 / M_PI)
 
     @parameter
     fn _op[width: Int](iv: Int):
@@ -418,7 +418,6 @@ fn gelu_backward( dinp:DTypePointer[dtype], inp:DTypePointer[dtype], dout:DTypeP
     
     @parameter
     fn _op[width: Int](iv: Int):
-    #for i in range(N):
         var x = inp.load[width=width](iv)
         var cube = 0.044715 * pow(x,3)
         var tanh_arg = s * (x + cube)
@@ -490,8 +489,7 @@ fn crossentropy_forward( losses:DTypePointer[dtype],
     
     @parameter
     fn _calc(b:Int):
-    #for b in range(B):
-        for t in range(T):
+        for t in range(T): #todo
             # loss = -log(probs[target])
             var probs_bt:DTypePointer[dtype] = probs + b * T * V + t * V
             var ix:Int32 = targets[b * T + t]
@@ -505,7 +503,6 @@ fn crossentropy_softmax_backward( dlogits:DTypePointer[dtype],
     
     @parameter
     fn _calc(b:Int):
-    #for b in range(B):
         for t in range(T):
             var dlogits_bt:DTypePointer[dtype] = dlogits + b * T * V + t * V
             var probs_bt:DTypePointer[dtype] = probs + b * T * V + t * V
