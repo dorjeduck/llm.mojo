@@ -9,9 +9,24 @@ This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/
 
 ## How to Use
 
-1. Set up `llm.c` by following the instructions at [llm.c](https://github.com/karpathy/llm.c).
-2. Place `train_gpt.mojo` and `train_gpt_basic.mojo` (if you have time) in the `llm.c` directory.
-3. Run `mojo train_gpt.mojo`.
+Download and tokenize a dataset. The `tinyshakespeare` dataset is the fastest to download and tokenize:
+
+```
+python prepro_tinyshakespeare.py
+```
+
+(this python script is from [https://github.com/karpathy/llm.c](https://github.com/karpathy/llm.c) - see Andrej's repo for more details on the dataset.)
+
+Alternatively you can also download the larger [TinyStories](https://huggingface.co/datasets/roneneldan/TinyStories) dataset.
+
+```
+python prepro_tinystory.py
+```
+ 
+
+Train the downloaded weights further:
+
+ ```mojo train_gpt.mojo```
 
 ## Benchmarks
 
