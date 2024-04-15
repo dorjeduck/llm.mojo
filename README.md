@@ -1,6 +1,6 @@
 # llm.🔥
 
-This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/llm.c) to [Mojo](https://docs.modular.com/mojo), currently in alpha. It is under active development and subject to significant changes. Users should expect to encounter bugs and unfinished features. Not to be taken too serious yet, an early version of someone just learning Mojo ...
+This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/llm.c) to [Mojo](https://docs.modular.com/mojo), currently in alpha. It is under active development and subject to significant changes. Users should expect to encounter bugs and unfinished features.
 
 ## Implementation
 
@@ -66,7 +66,7 @@ Preliminary benchmark results: (M2 MacBook Pro)
 ## Changelog
 
 - 2024.04.15
-  - Add Tokenizer (only supports decoding) - `llm.c` update 2024.04.14
+  - Tokenizer Added - `train_gpt2.c` Update 2024.04.14
 - 2024.04.13
   - Initial repository setup and commit.
 
