@@ -302,7 +302,7 @@ fn attention_backward( dinp:DTypePointer[dtype], dpreatt:DTypePointer[dtype], da
                         # preatt_bth[t2] += (query_t[i] * key_t2[i]) * scale
                         # so now we have:
                         dquery_t[i] += key_t2[i] * dpreatt_bth[t2] * scale
-                        dkey_t2[i] +=  query_t.load[i] * dpreatt_bth[t2] * scale
+                        dkey_t2[i] +=  query_t[i] * dpreatt_bth[t2] * scale
                        
                     
 fn gelu_forward( out:DTypePointer[dtype], inp:DTypePointer[dtype],N:Int32):
