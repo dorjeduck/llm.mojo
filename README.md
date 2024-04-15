@@ -4,7 +4,7 @@ This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/
 
 ## Implementation
 
-- **train_gpt_basic.mojo**: Basic port of `train_gpt.c` to Mojo. Does not leverage Mojo's capabilities.
+- **train_gpt_basic.mojo**: Basic port of train_gpt.c to Mojo, which does not leverage Mojo's capabilities. Beyond the initial commit, we will not provide further updates for the 'train_gpt2_basic' version, except for necessary bug fixes.
 - **train_gpt.mojo**: Enhanced version utilizing Mojo's performance gems like vectorization and parallelization. Work in progress.
 
 ## How to Use
@@ -65,9 +65,10 @@ Preliminary benchmark results: (M2 MacBook Pro)
 
 ## Changelog
 
-* 2024.04.13
-  * Initial repository setup and commit.
-
+- 2024.04.15
+  - Add Tokenizer (only supports decoding) - `llm.c` update 2024.04.14
+- 2024.04.13
+  - Initial repository setup and commit.
 
 ## License
 

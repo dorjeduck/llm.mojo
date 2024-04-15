@@ -1260,6 +1260,88 @@ fn sample_mult( probabilities:DTypePointer[dtype],n:Int32, coin:FLOAT) -> Int32:
     return n - 1
 
 # ----------------------------------------------------------------------------
+# Tokenizer (only supports decoding)
+
+struct Tokenizer:
+    var vocab_size:Int
+    var token_table:List[String]
+    var init_ok:Int
+
+    fn __init__(inout self,filename:StringRef) raises:
+        self.vocab_size = 0
+        self.token_table = List[String]()
+        self.init_ok = 0
+
+        var file:FileHandle
+
+        try:
+            file = open(filename, "rb")   
+        except:
+            print("---")
+            print("WARNING: Failed to open the tokenizer file", filename)
+            print("The Tokenizer is a new feature added April 14 2024.")
+            print("Re-run `python train_gpt2.py` to write it")
+            print("---")
+            
+            self.init_ok = 0
+            return
+
+        var num_bytes = 256 * sizeof[DType.int32]()
+      
+        var data_raw = file.read(num_bytes)
+       
+        var header = data_raw._steal_ptr().bitcast[DType.int32]()
+
+        if header[0] != 20240328:
+            print("Bad magic model file")
+            # EXIT_1
+        if header[1] != 1:
+            print("Bad version in model file")
+            # EXIT_1
+
+        self.vocab_size = header[2].to_int()
+
+        for i in range(self.vocab_size):
+            var length = file.read_bytes(1)[0]
+            var str: String = file.read(length.to_int())
+            if length>0 and len(str)>0:
+                self.token_table.append(str)
+
+        file.close()
+        self.init_ok = 1
+
+    fn decode(self, token_id:Int) -> String:
+
+        if (self.init_ok == 0):
+            return ""
+
+        if (token_id < self.vocab_size):
+            return self.token_table[token_id]
+        else:
+            print("invalid token id", token_id)
+            return ""
+
+    fn safe_printf(self,str:String):
+        # the tokens are raw bytes, and we we only want to print the printable ones
+        # many bytes can be various control codes, backspace, etc.
+        if str == NULL:
+            return
+        if str[0] == '\0':
+            return 
+        # handle individual byte tokens
+        # every token is asserted to be at least one byte so doing piece[1] is ok
+        
+        ### --- TODO
+        #if (str[1] == '\0') {
+            #unsigned char byte_val = piece[0];
+            #if (!(isprint(byte_val) || isspace(byte_val))) {
+            #    return; // weird byte, don't print it
+            #}
+        #}
+
+        print(str,end = "")
+
+# ----------------------------------------------------------------------------
 # main training loop
 
 fn main() raises:
@@ -1272,10 +1354,17 @@ fn main() raises:
     var tiny_stories_val:StringRef = "./data/TinyStories_val.bin"
     var tiny_shakespeare_train:StringRef = "./data/tiny_shakespeare_train.bin"
     var tiny_shakespeare_val:StringRef = "./data/tiny_shakespeare_val.bin"
-    ##var train_tokens:StringRef = access(tiny_shakespeare_train, F_OK) != -1 ? tiny_shakespeare_train : tiny_stories_train
-    ##var val_tokens:StringRef = access(tiny_shakespeare_val, F_OK) != -1 ? tiny_shakespeare_val : tiny_stories_val
+    
     var train_tokens:StringRef = tiny_shakespeare_train
     var val_tokens:StringRef = tiny_shakespeare_val
+
+    try:
+        var file = open(tiny_shakespeare_train,"r")
+        file.close()
+    except:
+        # both in one go ...
+        train_tokens = tiny_stories_train 
+        val_tokens = tiny_stories_val
 
     var B:Int32 = 4
     var T:Int32 = 64
@@ -1286,6 +1375,9 @@ fn main() raises:
     dataloader_init(val_loader, val_tokens, B, T)
     print("val dataset num_batches:", val_loader.num_batches)
     var val_num_batches:Int32 = 10
+
+    # build the Tokenizer
+    var tokenizer = Tokenizer("gpt2_tokenizer.bin")
 
     # some memory for generating samples from the model
     var rng_state:UInt64 = 1337
@@ -1314,6 +1406,7 @@ fn main() raises:
         if step > 0 and step % 20 == 0:
             gen_tokens[0] = GPT2_EOT # the GPT-2 EOT token kicks off the generation
             
+            print("generating:\n---")
             for t in range(1,gen_max_length):
                 # note that inference is wasteful here because
                 # for each t, we re-compute all activations between 0 and t
@@ -1322,14 +1415,19 @@ fn main() raises:
                 gpt2_forward(model, gen_tokens, NULL_INT, 1, t)
                 var probs = model.acts.probs + (t-1) * model.config.vocab_size
                 var coin:FLOAT = random_f32(rng_state)
-                var next_token:Int32 = sample_mult(probs, model.config.vocab_size, coin)
+                var next_token:Int = sample_mult(probs, model.config.vocab_size, coin).to_int()
                 gen_tokens[t] = next_token
-            
-            print("generated: ",end="")
-            for t in range(gen_max_length):
-                print( gen_tokens[t],end=" ")
-            print("")
-        
+
+                # print the generated token, either using the Tokenizer or a fallback
+                if tokenizer.init_ok:
+                    var token_str:String = tokenizer.decode(next_token)
+                    tokenizer.safe_printf(token_str)
+                else:
+                    # fall back to printing the token id
+                    print("%d ", next_token)
+
+            print("\n---")
+                  
         # do a training step
      
         var start_time = now()
