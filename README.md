@@ -13,13 +13,13 @@ Visit [llm.c on GitHub](https://github.com/karpathy/llm.c) for a detailed explan
 
 ### Step 1: Download and Tokenize a Dataset
 
-Use the `tinyshakespeare` dataset for a quick setup. This dataset is the fastest to download and tokenize. Run the following command to download and prepare the dataset:
+Use the [tinyshakespeare](https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt) dataset for a quick setup. This dataset is the fastest to download and tokenize. Run the following command to download and prepare the dataset:
 
 ```bash
 python prepro_tinyshakespeare.py
 ```
 
-This Python script is from Andrej Karpathy's [llm.c]((https://github.com/karpathy/llm.c)) repository. Visit the repository for more details on the dataset.
+This Python script is from Andrej Karpathy's [llm.c]((https://github.com/karpathy/llm.c)) repository. Visit the repository for more details.
 
 Alternatively, download and tokenize the larger TinyStories dataset with the following command:
 
@@ -31,7 +31,9 @@ python prepro_tinystory.py
 
 Train your model using the downloaded and tokenized data by running:
 
- ```mojo train_gpt.mojo```
+ ```bash
+ mojo train_gpt.mojo
+ ```
 
 ## Benchmarks
 
