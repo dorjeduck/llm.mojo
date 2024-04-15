@@ -53,6 +53,7 @@ def download():
     else:
         print(f"{data_filename} already exists, skipping download...")
 
+
 def tokenize():
     eot = enc._special_tokens['<|endoftext|>'] # end of text token
     data_filename = os.path.join(DATA_CACHE_DIR, "tiny_shakespeare.txt")
