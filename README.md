@@ -9,22 +9,27 @@ This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/
 
 ## How to Use
 
-Download and tokenize a dataset. The `tinyshakespeare` dataset is the fastest to download and tokenize:
+Visit [llm.c on GitHub](https://github.com/karpathy/llm.c) for a detailed explanation of the original project. For specifics about our Mojo-ported version, `llm.mojo`, follow the essential steps below:
+
+#### Step 1: Download and Tokenize a Dataset
+
+Use the `tinyshakespeare` dataset for a quick setup. This dataset is the fastest to download and tokenize. Run the following command to download and prepare the dataset:
 
 ```
 python prepro_tinyshakespeare.py
 ```
 
-(this python script is from [https://github.com/karpathy/llm.c](https://github.com/karpathy/llm.c) - see Andrej's repo for more details on the dataset.)
+This Python script is from Andrej Karpathy's [llm.c]((https://github.com/karpathy/llm.c)) repository. Visit the repository for more details on the dataset.
 
-Alternatively you can also download the larger [TinyStories](https://huggingface.co/datasets/roneneldan/TinyStories) dataset.
+Alternatively, download the larger TinyStories dataset. If you need a larger dataset, use the following command:
 
 ```
 python prepro_tinystory.py
 ```
- 
 
-Train the downloaded weights further:
+#### Step 2: Train the Model
+
+Train your model using the downloaded and tokenized data by running:
 
  ```mojo train_gpt.mojo```
 
