@@ -9,7 +9,7 @@ This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/
 
 ## How to Use
 
-Visit [llm.c on GitHub](https://github.com/karpathy/llm.c) for a detailed explanation of the original project. To use `llm.mojo`, follow the essential steps below:
+Visit [llm.c](https://github.com/karpathy/llm.c) for a detailed explanation of the original project. To use `llm.mojo`, follow the essential steps below:
 
 ### Step 1: Download and Tokenize a Dataset
 
