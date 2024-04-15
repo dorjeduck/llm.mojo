@@ -21,7 +21,7 @@ python prepro_tinyshakespeare.py
 
 This Python script is from Andrej Karpathy's [llm.c]((https://github.com/karpathy/llm.c)) repository. Visit the repository for more details.
 
-Alternatively, download and tokenize the larger TinyStories dataset with the following command:
+Alternatively, download and tokenize the larger [TinyStories](https://huggingface.co/datasets/roneneldan/TinyStories) dataset with the following command:
 
 ```bash
 python prepro_tinystory.py
