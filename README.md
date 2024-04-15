@@ -19,7 +19,7 @@ Use the [tinyshakespeare](https://raw.githubusercontent.com/karpathy/char-rnn/ma
 python prepro_tinyshakespeare.py
 ```
 
-This Python script is from Andrej Karpathy's [llm.c]((https://github.com/karpathy/llm.c)) repository. Visit the repository for more details.
+(all Python script in this repo are from Andrej Karpathy's [llm.c]((https://github.com/karpathy/llm.c)) repository.)
 
 Alternatively, download and tokenize the larger [TinyStories](https://huggingface.co/datasets/roneneldan/TinyStories) dataset with the following command:
 
