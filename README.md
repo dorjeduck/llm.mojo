@@ -27,6 +27,14 @@ Alternatively, download and tokenize the larger TinyStories dataset with the fol
 python prepro_tinystory.py
 ```
 
+### Step 3 Download the weights
+
+Next download the GPT-2 weights and save them as a checkpoint we can load in Mojo with following command:
+
+```bash
+python train_gpt2.py
+```
+
 ### Step 2: Train the Model
 
 Train your model using the downloaded and tokenized data by running:
