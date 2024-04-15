@@ -15,7 +15,7 @@ alias INT = SIMD[dtype_int, 1]
 
 alias NULL = DTypePointer[dtype]()
 alias NULL_INT = DTypePointer[dtype_int]()
-alias M_PI:FLOAT = 3.14159265358979323846
+alias M_PI:FLOAT = 3.141592653589793
 
 alias GPT2_EOT=50256
 
@@ -302,6 +302,8 @@ fn attention_backward( dinp:DTypePointer[dtype], dpreatt:DTypePointer[dtype], da
                         # preatt_bth[t2] += (query_t[i] * key_t2[i]) * scale
                         # so now we have:
                         dquery_t[i] += key_t2[i] * dpreatt_bth[t2] * scale
+                        dkey_t2[i] +=  query_t.load[i] * dpreatt_bth[t2] * scale
+                       
                     
 fn gelu_forward( out:DTypePointer[dtype], inp:DTypePointer[dtype],N:Int32):
     var s:FLOAT = sqrt(2.0 / M_PI)
