@@ -66,6 +66,8 @@ Preliminary benchmark results: (M2 MacBook Pro)
 ## Changelog
 
 - 2024.04.15
+  - Vectorize parameters update
+- 2024.04.15
   - Tokenizer Added - `train_gpt2.c` Update 2024.04.14
   - Bug fix `attention_backward`
 - 2024.04.13
