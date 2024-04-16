@@ -71,10 +71,8 @@ fn encoder_backward(dwte:DTypePointer[dtype], dwpe:DTypePointer[dtype],dout:DTyp
 fn layernorm_forward(inout out:DTypePointer[dtype], mean:DTypePointer[dtype], rstd:DTypePointer[dtype],inp:DTypePointer[dtype], weight:DTypePointer[dtype], bias:DTypePointer[dtype],B:Int32,T:Int32,C:Int32):
    
     var eps:FLOAT = 1e-5
-
     @parameter
     fn _calc(b:Int):
-    #for b in range(B):
         for t in range(T):
             # seek to the input position inp[b,t,:]
             var x:DTypePointer[dtype] = inp + b * T * C + t * C
@@ -120,7 +118,6 @@ fn layernorm_backward( dinp:DTypePointer[dtype], dweight:DTypePointer[dtype], db
                         B:Int32,T:Int32,C:Int32):
     @parameter
     fn _calc(b:Int):
-    #for b in range(B):
         for t in range(T):
             var dout_bt:DTypePointer[dtype] = dout + b * T * C + t * C
             var inp_bt:DTypePointer[dtype] = inp + b * T * C + t * C
@@ -1118,22 +1115,46 @@ fn gpt2_update(inout model:GPT2, learning_rate:FLOAT, beta1:FLOAT, beta2:FLOAT, 
         memset_zero(model.m_memory,model.num_parameters.to_int())
         memset_zero(model.v_memory,model.num_parameters.to_int())
 
-    for i in range(model.num_parameters):
-        var param:FLOAT = model.params_memory[i]
-        var grad:FLOAT = model.grads_memory[i]
+   
+    @parameter
+    fn _op[width: Int](iv: Int):
+        var param = model.params_memory.load[width=width](iv)
+        var grad = model.grads_memory.load[width=width](iv)
 
         # update the first moment (momentum)
-        var m:FLOAT = beta1 * model.m_memory[i] + (1.0 - beta1) * grad
+        var m = beta1 * model.m_memory.load[width=width](iv) + (1.0 - beta1) * grad
         # update the second moment (RMSprop)
-        var v:FLOAT = beta2 * model.v_memory[i] + (1.0 - beta2) * grad * grad
+        var v = beta2 * model.v_memory.load[width=width](iv) + (1.0 - beta2) * grad * grad
         # bias-correct both moments
-        var m_hat:FLOAT = m / (1.0 - pow(beta1, t))
-        var v_hat:FLOAT = v / (1.0 - pow(beta2, t))
+        var m_hat = m / (1.0 - pow(beta1, t))
+        var v_hat = v / (1.0 - pow(beta2, t))
 
         # update
-        model.m_memory[i] = m
-        model.v_memory[i] = v
-        model.params_memory[i] -= learning_rate * (m_hat / (sqrt(v_hat) + eps) + weight_decay * param)
+        model.m_memory.store[width=width](iv, m)
+        model.v_memory.store[width=width](iv,v)
+        model.params_memory.store[width=width](iv,model.params_memory.load[width=width](iv) - learning_rate * (m_hat / (sqrt(v_hat) + eps) + weight_decay * param))
+    
+
+    vectorize[_op, SIMD_WIDTH](size=model.num_parameters.to_int())
+
+    print()
+
+    #for i in range(model.num_parameters):
+    #    var param:FLOAT = model.params_memory[i]
+    #    var grad:FLOAT = model.grads_memory[i]
+    #
+    #    # update the first moment (momentum)
+    #    var m:FLOAT = beta1 * model.m_memory[i] + (1.0 - beta1) * grad
+    #    # update the second moment (RMSprop)
+    #    var v:FLOAT = beta2 * model.v_memory[i] + (1.0 - beta2) * grad * grad
+    #    # bias-correct both moments
+    #    var m_hat:FLOAT = m / (1.0 - pow(beta1, t))
+    #    var v_hat:FLOAT = v / (1.0 - pow(beta2, t))
+
+        # update
+    #     model.m_memory[i] = m
+    #    model.v_memory[i] = v
+    #    model.params_memory[i] -= learning_rate * (m_hat / (sqrt(v_hat) + eps) + weight_decay * param)
     
 
 fn gpt2_free(inout model:GPT2):
