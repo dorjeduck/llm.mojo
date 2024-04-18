@@ -15,7 +15,7 @@ alias INT = SIMD[dtype_int, 1]
 
 alias NULL = DTypePointer[dtype]()
 alias NULL_INT = DTypePointer[dtype_int]()
-alias M_PI:FLOAT = 3.141592653589793
+alias M_PI:FLOAT = 3.141592653589793115997963468544185161590576171875
 
 alias GPT2_EOT=50256
 
@@ -78,7 +78,7 @@ fn layernorm_forward(inout out:DTypePointer[dtype], mean:DTypePointer[dtype], rs
             v = v/C.to_int()
            
             # calculate the rstd
-            var s:FLOAT = 1.0 * rsqrt(v + eps)
+            var s:FLOAT = 1.0 / sqrt(v + eps)
 
             # seek to the output position in out[b,t,:]
             var out_bt:DTypePointer[dtype] = out + b * T * C + t * C
@@ -193,7 +193,7 @@ fn attention_forward( out:DTypePointer[dtype], preatt:DTypePointer[dtype], att:D
     # output is (B, T, C)
     var C3:Int32 = C*3
     var hs:Int32 = C / NH # head size
-    var scale:FLOAT = 1.0 * rsqrt(hs.cast[dtype]())
+    var scale:FLOAT = 1.0 / sqrt(hs.cast[dtype]())
 
     #pragma omp parallel for collapse(3)
     for b in range(B):
@@ -259,7 +259,7 @@ fn attention_backward( dinp:DTypePointer[dtype], dpreatt:DTypePointer[dtype], da
     # dout is (B, T, C)
     var C3:Int32 = C*3
     var hs:Int32 = C / NH # head size
-    var scale:FLOAT = 1.0 * rsqrt(hs.cast[dtype]())
+    var scale:FLOAT = 1.0 / sqrt(hs.cast[dtype]())
 
     for b in range(B):
         for t in range(T):
@@ -1001,7 +1001,7 @@ fn gpt2_update(inout model:GPT2, learning_rate:FLOAT, beta1:FLOAT, beta2:FLOAT, 
         # update
         model.m_memory[i] = m
         model.v_memory[i] = v
-        model.params_memory[i] -= learning_rate * (m_hat / (rsqrt(v_hat) + eps) + weight_decay * param)
+        model.params_memory[i] -= learning_rate * (m_hat / (sqrt(v_hat) + eps) + weight_decay * param)
     
 
 fn gpt2_free(inout model:GPT2):
