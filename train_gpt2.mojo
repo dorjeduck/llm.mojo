@@ -1432,8 +1432,7 @@ struct Tokenizer:
             # EXIT_1
 
         self.vocab_size = header[2].to_int()
-        print(self.vocab_size)
-
+        
         for i in range(self.vocab_size):
             var length = file.read_bytes(1)[0]
             var str: String = file.read(length.to_int())
@@ -1448,7 +1447,7 @@ struct Tokenizer:
         if (self.init_ok == 0):
             return ""
 
-        if (token_id < self.vocab_size):
+        if (token_id < self.vocab_size and token_id >= 0):
             return self.token_table[token_id]
         else:
             print("invalid token id", token_id)
