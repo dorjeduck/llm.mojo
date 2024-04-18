@@ -6,19 +6,20 @@ from python import Python
 from time import now
 from sys.info import is_apple_silicon
 
-alias RU32_HEX = 0x2545F4914F6CDD1D
-alias RF32_DIV = 16777216.0
-
-alias dtype = DType.float32
-alias FLOAT = SIMD[dtype,1]
-
-alias SIMD_WIDTH = get_simd_width()
-
 fn get_simd_width() -> Int:
     if is_apple_silicon():
         return 4 * simdwidthof[dtype]()
     else:
         return 2 * simdwidthof[dtype]()
+
+alias SIMD_WIDTH = get_simd_width()
+
+alias RU32_HEX = 0x2545F4914F6CDD1D
+alias RF32_DIV = 16777216.0
+alias dtype = DType.float32
+alias FLOAT = SIMD[dtype,1]
+
+
 
 alias dtype_int = DType.int32
 alias INT = SIMD[dtype_int, 1]
@@ -1455,10 +1456,10 @@ struct Tokenizer:
         if (self.init_ok == 0):
             return ""
 
-        if (token_id < self.vocab_size and token_id >= 0):
+        if (token_id < len(self.token_table) and token_id >= 0):
             return self.token_table[token_id]
         else:
-            print("invalid token id", token_id)
+            #print("invalid token id", token_id)
             return ""
 
     fn safe_printf(self,str:String):
