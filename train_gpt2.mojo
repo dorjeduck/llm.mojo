@@ -1401,7 +1401,8 @@ fn sample_mult( probabilities:DTypePointer[dtype],n:Int32, coin:FLOAT) -> Int32:
     return n - 1
 
 # ----------------------------------------------------------------------------
-# Tokenizer (only supports decoding)
+# Tokenizer (only supports decoding) 
+# this mojo version needs refinements, still buggy
 
 struct Tokenizer:
     var vocab_size:Int
