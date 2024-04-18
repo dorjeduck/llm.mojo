@@ -11,7 +11,13 @@ This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/
 
 Visit [llm.c](https://github.com/karpathy/llm.c) for a detailed explanation of the original project. To use `llm.mojo`, follow the essential steps below:
 
-### Step 1: Download and Tokenize a Dataset
+### Step 1: Install python requirements
+
+```bash
+pip install -r requiremens.txt
+```
+
+### Step 2: Download and Tokenize a Dataset
 
 Use the [tinyshakespeare](https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt) dataset for a quick setup. This dataset is the fastest to download and tokenize. Run the following command to download and prepare the dataset:
 
@@ -27,7 +33,7 @@ Alternatively, download and tokenize the larger [TinyStories](https://huggingfac
 python prepro_tinystory.py
 ```
 
-### Step 2: Download the weights
+### Step 3: Download the weights
 
 Next download the GPT-2 weights and save them as a checkpoint we can load in Mojo with following command:
 
@@ -35,7 +41,7 @@ Next download the GPT-2 weights and save them as a checkpoint we can load in Moj
 python train_gpt2.py
 ```
 
-### Step 3: Train the Model
+### Step 4: Train the Model
 
 Train your model using the downloaded and tokenized data by running:
 
