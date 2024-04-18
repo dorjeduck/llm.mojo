@@ -1432,6 +1432,7 @@ struct Tokenizer:
             # EXIT_1
 
         self.vocab_size = header[2].to_int()
+        print(self.vocab_size)
 
         for i in range(self.vocab_size):
             var length = file.read_bytes(1)[0]
@@ -1440,7 +1441,6 @@ struct Tokenizer:
                 self.token_table.append(str)
 
         file.close()
-        header.free()
         self.init_ok = 1
 
     fn decode(self, token_id:Int) -> String:
