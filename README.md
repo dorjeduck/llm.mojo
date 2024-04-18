@@ -55,8 +55,8 @@ Preliminary benchmark results: (M2 MacBook Pro)
 
 | Implementation             | Average Training Loop Time |
 |----------------------------|----------------------------|
+| train_gpt2.mojo             | 2079 ms                    |
 | train_gpt2.c (with OpenMP)  | 2119 ms                    |
-| train_gpt2.mojo             | 2256 ms                    |
 | train_gpt2.c  (no OpenMP)   | 7473 ms                    |
 | train_gpt2_basic.mojo       | 54509 ms                   |
 
@@ -71,6 +71,8 @@ Preliminary benchmark results: (M2 MacBook Pro)
 
 ## Changelog
 
+- 2024.04.18
+  - Further optimizations of train_gpt2.mojo.
 - 2024.04.16
   - Vectorize parameter update
 - 2024.04.15
