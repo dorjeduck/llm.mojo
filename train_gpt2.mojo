@@ -4,13 +4,21 @@ from math import sqrt,rsqrt,exp,tanh,cosh,log,pow,max
 from memory import memset_zero,memcpy
 from python import Python
 from time import now
+from sys.info import is_apple_silicon
 
 alias RU32_HEX = 0x2545F4914F6CDD1D
 alias RF32_DIV = 16777216.0
 
 alias dtype = DType.float32
 alias FLOAT = SIMD[dtype,1]
-alias SIMD_WIDTH = 2*simdwidthof[dtype]()
+
+alias SIMD_WIDTH = get_simd_width()
+
+fn get_simd_width() -> Int:
+    if is_apple_silicon():
+        return 4 * simdwidthof[dtype]()
+    else:
+        return 2 * simdwidthof[dtype]()
 
 alias dtype_int = DType.int32
 alias INT = SIMD[dtype_int, 1]
@@ -1432,7 +1440,7 @@ struct Tokenizer:
             # EXIT_1
 
         self.vocab_size = header[2].to_int()
-        
+
         for i in range(self.vocab_size):
             var length = file.read_bytes(1)[0]
             var str: String = file.read(length.to_int())
