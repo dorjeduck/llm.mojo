@@ -14,7 +14,7 @@ Visit [llm.c](https://github.com/karpathy/llm.c) for a detailed explanation of t
 ### Step 1: Install python requirements
 
 ```bash
-pip install -r requiremens.txt
+pip install -r requirements.txt
 ```
 
 ### Step 2: Download and Tokenize a Dataset
