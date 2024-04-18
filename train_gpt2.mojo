@@ -17,7 +17,7 @@ alias INT = SIMD[dtype_int, 1]
 
 alias NULL = DTypePointer[dtype]()
 alias NULL_INT = DTypePointer[dtype_int]()
-alias M_PI:FLOAT = 3.14159265358979323846
+alias M_PI:FLOAT = 3.141592653589793115997963468544185161590576171875
 
 alias GPT2_EOT=50256
 
@@ -68,7 +68,8 @@ fn encoder_backward(dwte:DTypePointer[dtype], dwpe:DTypePointer[dtype],dout:DTyp
     parallelize[_calc](B.to_int(), B.to_int())  
             
     
-fn layernorm_forward(inout out:DTypePointer[dtype], mean:DTypePointer[dtype], rstd:DTypePointer[dtype],inp:DTypePointer[dtype], weight:DTypePointer[dtype], bias:DTypePointer[dtype],B:Int32,T:Int32,C:Int32):
+fn layernorm_forward( out:DTypePointer[dtype],  mean:DTypePointer[dtype], rstd:DTypePointer[dtype],inp:DTypePointer[dtype], weight:DTypePointer[dtype], bias:DTypePointer[dtype],B:Int32,T:Int32,C:Int32):
+   
    
     var eps:FLOAT = 1e-5
     @parameter
@@ -78,15 +79,22 @@ fn layernorm_forward(inout out:DTypePointer[dtype], mean:DTypePointer[dtype], rs
             var x:DTypePointer[dtype] = inp + b * T * C + t * C
             # calculate the mean
             var m:FLOAT = 0.0
+            #for i in range(C):
+            #    m += x[i]
 
             @parameter
             fn _op[width: Int](iv: Int):
                 m += x.load[width=width](iv).reduce_add[1]()
             vectorize[_op, SIMD_WIDTH](size=C.to_int())
-            
+ 
             m = m/C.to_int()
+
             # calculate the variance (without any bias correction)
             var v:FLOAT = 0.0
+
+            #for i in range(C):
+            #    var xshift:FLOAT = x[i] - m
+            #    v += xshift * xshift
 
             @parameter
             fn _op2[width: Int](iv: Int):
@@ -111,6 +119,7 @@ fn layernorm_forward(inout out:DTypePointer[dtype], mean:DTypePointer[dtype], rs
             # cache the mean and rstd for the backward pass later
             mean[b * T + t] = m
             rstd[b * T + t] = s
+           
     parallelize[_calc](B.to_int(), B.to_int())  
         
 fn layernorm_backward( dinp:DTypePointer[dtype], dweight:DTypePointer[dtype], dbias:DTypePointer[dtype],
@@ -129,16 +138,20 @@ fn layernorm_backward( dinp:DTypePointer[dtype], dweight:DTypePointer[dtype], db
             var dnorm_mean:FLOAT = 0.0
             var dnorm_norm_mean:FLOAT = 0.0
 
+            #for i in range(C):
+            #    var norm_bti:FLOAT = (inp_bt[i] - mean_bt) * rstd_bt
+            #    var dnorm_i:FLOAT = weight[i] * dout_bt[i]
+            #    dnorm_mean += dnorm_i
+            #    dnorm_norm_mean += dnorm_i * norm_bti
+                
             @parameter
             fn _op[width: Int](iv: Int):
-
                 var norm_bti = (inp_bt.load[width=width](iv) - mean_bt) * rstd_bt
                 var dnorm_i = weight.load[width=width](iv) * dout_bt.load[width=width](iv)
                 dnorm_mean += dnorm_i.reduce_add[1]()
                 dnorm_norm_mean += (dnorm_i * norm_bti).reduce_add[1]()    
-   
             vectorize[_op, SIMD_WIDTH](size=C.to_int())
-     
+          
             dnorm_mean = dnorm_mean / C.to_int()
             dnorm_norm_mean = dnorm_norm_mean / C.to_int()
             
@@ -157,8 +170,8 @@ fn layernorm_backward( dinp:DTypePointer[dtype], dweight:DTypePointer[dtype], db
                     dinp_bt.load[width=width](iv)
                     + (dnorm_i
                         - dnorm_mean
-                        - norm_bti
-                        * dnorm_norm_mean
+                        - (norm_bti
+                        * dnorm_norm_mean)
                         ) 
                     * rstd_bt
                 )
@@ -188,6 +201,9 @@ fn matmul_forward( out:DTypePointer[dtype],
                 if bias != NULL:
                     val = bias[o]
                 var wrow:DTypePointer[dtype] = weight + o*C
+
+                #for i in range(C):
+                #    val += inp_bt[i] * wrow[i]
 
                 @parameter
                 fn _op[width: Int](iv: Int):
@@ -273,6 +289,9 @@ fn attention_forward( out:DTypePointer[dtype], preatt:DTypePointer[dtype], att:D
                     # (query_t) dot (key_t2)
                     var val:FLOAT = 0.0
 
+                    #for i in range(hs):
+                    #    val += query_t[i] * key_t2[i]
+
                     @parameter
                     fn _op[width: Int](iv: Int):
                         var t = query_t.load[width=width](iv) * key_t2.load[width=width](iv) 
@@ -287,6 +306,11 @@ fn attention_forward( out:DTypePointer[dtype], preatt:DTypePointer[dtype], att:D
                 
                 # pass 2: calculate the exp and keep track of sum
                 var expsum:FLOAT = 0.0
+
+                #for t2 in range(t+1):
+                #    var expv:FLOAT = exp(preatt_bth[t2] - maxval)
+                #    expsum += expv
+                #    att_bth[t2] = expv
 
                 @parameter
                 fn _op2[width: Int](iv: Int):
@@ -356,6 +380,13 @@ fn attention_backward( dinp:DTypePointer[dtype], dpreatt:DTypePointer[dtype], da
                     var value_t2:DTypePointer[dtype] = inp + b * T * C3 + t2 * C3 + h * hs + C*2 # +C*2 because it's value
                     var dvalue_t2:DTypePointer[dtype] = dinp + b * T * C3 + t2 * C3 + h * hs + C*2
                     
+                    #for i in range(hs):
+                    #    # in the forward pass this was:
+                    #    # out_bth[i] += att_bth[t2] * value_t2[i]
+                    #    # so now we have:
+                    #    datt_bth[t2] += value_t2[i] * dout_bth[i]
+                    #    dvalue_t2[i] += att_bth[t2] * dout_bth[i]
+
                     @parameter
                     fn _op[width: Int](iv: Int):
                     #for i in range(hs):
@@ -390,7 +421,7 @@ fn attention_backward( dinp:DTypePointer[dtype], dpreatt:DTypePointer[dtype], da
                         # so now we have:
                         dquery_t.store[width=width](iv,dquery_t.load[width=width](iv) + key_t2.load[width=width](iv) * dpreatt_bth[t2] * scale)
                         dkey_t2.store[width=width](iv,dkey_t2.load[width=width](iv) + query_t.load[width=width](iv) * dpreatt_bth[t2] * scale)
-                        #????
+                     
                     
                     vectorize[_op2, SIMD_WIDTH](size=hs.to_int())
     
@@ -461,6 +492,10 @@ fn softmax_forward( probs:DTypePointer[dtype], logits:DTypePointer[dtype],B:Int3
                     maxval = logits_bt[i]
                 
             var sum:FLOAT = 0.0
+
+            #for i in range(V):
+            #    probs_bt[i] = exp(logits_bt[i] - maxval)
+            #    sum += probs_bt[i]
            
             @parameter
             fn _op[width: Int](iv: Int):
@@ -566,11 +601,12 @@ struct ParameterTensors:
 
     fn alloc_and_point_parameters(inout self,param_sizes: InlinedFixedVector[type=Int32, size=NUM_PARAMETER_TENSORS]) -> DTypePointer[dtype]:
 
-        var num_parameters: Int32 = 0
-        var i: Int
+        var num_parameters: Int64 = 0
+        
+       
 
         for i in range(NUM_PARAMETER_TENSORS):
-            num_parameters += param_sizes[i]
+            num_parameters += param_sizes[i].cast[DType.int64]()
 
         # malloc all parameters all at once
         self.params_memory = DTypePointer[dtype]().alloc(num_parameters.to_int())
@@ -688,10 +724,10 @@ struct ActivationTensors:
             Pointer.address_of(self.losses),
         )
 
-        var num_activations: Int32 = 0
+        var num_activations: Int64 = 0
 
         for i in range(NUM_ACTIVATION_TENSORS):
-            num_activations += act_sizes[i]
+            num_activations += act_sizes[i].cast[DType.int64]()
 
         var acts_memory = DTypePointer[dtype]().alloc(num_activations.to_int())
 
@@ -716,7 +752,7 @@ struct GPT2:
     var params: ParameterTensors
     var param_sizes: InlinedFixedVector[type=Int32, size=NUM_PARAMETER_TENSORS]
     var params_memory: DTypePointer[dtype]
-    var num_parameters: Int32
+    var num_parameters: Int64
     # gradients of the weights
     var grads: ParameterTensors
     var grads_memory: DTypePointer[dtype]
@@ -727,7 +763,7 @@ struct GPT2:
     var acts: ActivationTensors
     var act_sizes: InlinedFixedVector[type=Int32, size=NUM_ACTIVATION_TENSORS]
     var acts_memory: DTypePointer[dtype]
-    var num_activations: Int32
+    var num_activations: Int64
     # gradients of the activations
     var grads_acts: ActivationTensors
     var grads_acts_memory: DTypePointer[dtype]
@@ -809,10 +845,10 @@ struct GPT2:
         self.param_sizes[15] = C
 
         # cound the number of paramaters
-        var num_parameters: Int32 = 0
+        var num_parameters: Int64 = 0
 
         for i in range(NUM_PARAMETER_TENSORS):
-            num_parameters += self.param_sizes[i]
+            num_parameters += self.param_sizes[i].cast[DType.int64]()
 
         print("num_parameters:", num_parameters)
         self.num_parameters = num_parameters
@@ -891,9 +927,9 @@ fn gpt2_forward(inout model:GPT2, inputs:DTypePointer[dtype_int], targets:DTypeP
         model.act_sizes[21] = B * T * V
         model.act_sizes[22] = B * T
 
-        var num_activations:Int32 = 0
+        var num_activations:Int64 = 0
         for i in range(NUM_ACTIVATION_TENSORS):
-            num_activations += model.act_sizes[i]
+            num_activations += model.act_sizes[i].cast[DType.int64]()
         
         print("num_activations:", num_activations)
     
@@ -1136,8 +1172,6 @@ fn gpt2_update(inout model:GPT2, learning_rate:FLOAT, beta1:FLOAT, beta2:FLOAT, 
     
 
     vectorize[_op, SIMD_WIDTH](size=model.num_parameters.to_int())
-
-    print()
 
     #for i in range(model.num_parameters):
     #    var param:FLOAT = model.params_memory[i]
@@ -1409,7 +1443,7 @@ fn main() raises:
     for step in range(41):
        
         # once in a while estimate the validation loss
-        if step % 10 == 0:
+        if step % 10 == 10:
             var val_loss:FLOAT = 0.0
             dataloader_reset(val_loader)
             for i in range(val_num_batches):
@@ -1421,7 +1455,7 @@ fn main() raises:
             print("val loss", val_loss)
         
         # once in a while do model inference to prgenerated INT32 text
-        if step > 0 and step % 20 == 0:
+        if  step > 0 and step % 20 == 0:
             gen_tokens[0] = GPT2_EOT # the GPT-2 EOT token kicks off the generation
             
             print("generating:\n---")
