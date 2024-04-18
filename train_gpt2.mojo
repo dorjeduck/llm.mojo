@@ -1,6 +1,6 @@
 from algorithm import vectorize,parallelize
 from collections.vector import InlinedFixedVector
-from math import sqrt,rsqrt,exp,tanh,cosh,log,pow
+from math import sqrt,rsqrt,exp,tanh,cosh,log,pow,max
 from memory import memset_zero,memcpy
 from python import Python
 from time import now
@@ -25,6 +25,22 @@ alias EXIT_1 = external_call["exit",Int](1)
 
 alias SIZEOF_INT = sizeof[DType.int32]()
 alias SIZEOF_FLOAT = sizeof[DType.float32]()
+
+alias NUM_PARALLELIZE = 8
+
+## helper functions not in the original llm.c
+
+fn count_divisions_by_two(n:Int) -> Int:
+    if n == 0:
+        return 0  
+    var _n  = n# Edge case, as zero cannot be divided by two
+    var count = 0
+    while _n & 1 == 0:
+        _n >>= 1
+        count += 1
+    return count
+
+
 
 ## ----------------------------------------------------------------------------
 # all the individual layers' forward and backward passes
@@ -431,46 +447,103 @@ fn attention_backward( dinp:DTypePointer[dtype], dpreatt:DTypePointer[dtype], da
 fn gelu_forward( out:DTypePointer[dtype], inp:DTypePointer[dtype],N:Int32):
     var s:FLOAT  = sqrt(2.0 / M_PI)
 
+    var num_vectorize = N / NUM_PARALLELIZE
+
     @parameter
-    fn _op[width: Int](iv: Int):
-        var x = inp.load[width=width](iv)
-        var cube = 0.044715 * pow(x,3) 
-        out.store[width=width](iv,0.5 * x * (1.0 + tanh(s * (x + cube))))
-       
-    vectorize[_op, SIMD_WIDTH](size=N.to_int())
+    fn _calc(ip:Int):
+        @parameter
+        fn _op[width: Int](_iv: Int):
+            var iv = ip*num_vectorize + _iv
 
+            var x = inp.load[width=width](iv)
+            var cube = 0.044715 * pow(x,3) 
+            out.store[width=width](iv,0.5 * x * (1.0 + tanh(s * (x + cube))))
+                    
+        vectorize[_op, SIMD_WIDTH](num_vectorize.to_int())
 
+    parallelize[_calc](NUM_PARALLELIZE,NUM_PARALLELIZE)
+
+    #@parameter
+    #fn _op[width: Int](iv: Int):
+    #    var x = inp.load[width=width](iv)
+    #    var cube = 0.044715 * pow(x,3) 
+    #    out.store[width=width](iv,0.5 * x * (1.0 + tanh(s * (x + cube))))
+    #   
+    #vectorize[_op, SIMD_WIDTH](size=N.to_int())
    
 fn gelu_backward( dinp:DTypePointer[dtype], inp:DTypePointer[dtype], dout:DTypePointer[dtype],N:Int32):
     var s:FLOAT = sqrt(2.0 / M_PI)
-    
+    var num_vectorize = N / NUM_PARALLELIZE
+  
     @parameter
-    fn _op[width: Int](iv: Int):
-        var x = inp.load[width=width](iv)
-        var cube = 0.044715 * pow(x,3)
-        var tanh_arg = s * (x + cube)
-        var tanh_out = tanh(tanh_arg)
-        var coshf_out = cosh(tanh_arg)
-        var sech_out = 1.0 / (coshf_out * coshf_out)
-        var local_grad = 0.5 * (1.0 + tanh_out) + x * 0.5 * sech_out * s * (1.0 + 3.0 * 0.044715 * x * x)
-        dinp.store[width=width](iv,dinp.load[width=width](iv) + local_grad * dout.load[width=width](iv))
-   
-    vectorize[_op, SIMD_WIDTH](size=N.to_int())
+    fn _calc(ip:Int):
+        @parameter
+        fn _op[width: Int](_iv: Int):
+            var iv = ip*num_vectorize + _iv
+
+            var x = inp.load[width=width](iv)
+            var cube = 0.044715 * pow(x,3)
+            var tanh_arg = s * (x + cube)
+            var tanh_out = tanh(tanh_arg)
+            var coshf_out = cosh(tanh_arg)
+            var sech_out = 1.0 / (coshf_out * coshf_out)
+            var local_grad = 0.5 * (1.0 + tanh_out) + x * 0.5 * sech_out * s * (1.0 + 3.0 * 0.044715 * x * x)
+            dinp.store[width=width](iv,dinp.load[width=width](iv) + local_grad * dout.load[width=width](iv))
+        
+        vectorize[_op, SIMD_WIDTH](num_vectorize.to_int())
+    parallelize[_calc](NUM_PARALLELIZE,NUM_PARALLELIZE)
+    #
+    #@parameter
+    #fn _op[width: Int](iv: Int):
+    #    var x = inp.load[width=width](iv)
+    #    var cube = 0.044715 * pow(x,3)
+    #    var tanh_arg = s * (x + cube)
+    #    var tanh_out = tanh(tanh_arg)
+    #    var coshf_out = cosh(tanh_arg)
+    #    var sech_out = 1.0 / (coshf_out * coshf_out)
+    #    var local_grad = 0.5 * (1.0 + tanh_out) + x * 0.5 * sech_out * s * (1.0 + 3.0 * 0.044715 * x * x)
+    #    dinp.store[width=width](iv,dinp.load[width=width](iv) + local_grad * dout.load[width=width](iv))
+    #
+    #vectorize[_op, SIMD_WIDTH](size=N.to_int())
 
 fn residual_forward( out:DTypePointer[dtype], inp1:DTypePointer[dtype], inp2:DTypePointer[dtype],N:Int32):
-    
+    var num_vectorize = N / NUM_PARALLELIZE
+
     @parameter
-    fn _op[width: Int](iv: Int):
-        out.store[width=width](iv,inp1.load[width=width](iv) + inp2.load[width=width](iv)) # scale and shift it        
-    vectorize[_op, SIMD_WIDTH](size=N.to_int())
+    fn _calc(ip:Int):
+        @parameter
+        fn _op[width: Int](_iv: Int):
+            var iv = ip*num_vectorize + _iv
+            out.store[width=width](iv,inp1.load[width=width](iv) + inp2.load[width=width](iv)) # scale and shift it        
+        vectorize[_op, SIMD_WIDTH](num_vectorize.to_int())
+    parallelize[_calc](NUM_PARALLELIZE,NUM_PARALLELIZE)
+
+    #@parameter
+    #fn _op[width: Int](iv: Int):
+    #    out.store[width=width](iv,inp1.load[width=width](iv) + inp2.load[width=width](iv)) # scale and shift it        
+    #vectorize[_op, SIMD_WIDTH](size=N.to_int())
 
 fn residual_backward( dinp1:DTypePointer[dtype], dinp2:DTypePointer[dtype], dout:DTypePointer[dtype],N:Int32):
     
+    var num_vectorize = N / NUM_PARALLELIZE
+
     @parameter
-    fn _op[width: Int](iv: Int):
-        dinp1.store[width=width](iv,dinp1.load[width=width](iv) + dout.load[width=width](iv)) # scale and shift it        
-        dinp2.store[width=width](iv,dinp2.load[width=width](iv) + dout.load[width=width](iv)) # scale and shift it        
-    vectorize[_op, SIMD_WIDTH](size=N.to_int())
+    fn _calc(ip:Int):
+        @parameter
+        fn _op[width: Int](_iv: Int):
+            var iv = ip*num_vectorize + _iv
+
+            dinp1.store[width=width](iv,dinp1.load[width=width](iv) + dout.load[width=width](iv)) # scale and shift it        
+            dinp2.store[width=width](iv,dinp2.load[width=width](iv) + dout.load[width=width](iv)) # scale and shift it        
+  
+        vectorize[_op, SIMD_WIDTH](num_vectorize.to_int())
+    parallelize[_calc](NUM_PARALLELIZE,NUM_PARALLELIZE)
+
+    #@parameter
+    #fn _op[width: Int](iv: Int):
+    #    dinp1.store[width=width](iv,dinp1.load[width=width](iv) + dout.load[width=width](iv)) # scale and shift it        
+    #    dinp2.store[width=width](iv,dinp2.load[width=width](iv) + dout.load[width=width](iv)) # scale and shift it        
+    #vectorize[_op, SIMD_WIDTH](size=N.to_int())
 
 
 fn softmax_forward( probs:DTypePointer[dtype], logits:DTypePointer[dtype],B:Int32,T:Int32,V:Int32):
@@ -775,7 +848,6 @@ struct GPT2:
         dtype_int
     ]  # the target tokens for the current forward pass
     var mean_loss: FLOAT  # after a forward pass with targets, will be populated with the mean loss
-
     var checkpoint_path: StringRef
 
     fn __init__(inout self, checkpoint_path: StringRef) raises:
@@ -853,6 +925,7 @@ struct GPT2:
         print("num_parameters:", num_parameters)
         self.num_parameters = num_parameters
 
+       
         # read in all the parameters from file
         self.params = ParameterTensors()
         self.params_memory = self.params.alloc_and_point_parameters(self.param_sizes)
@@ -1151,27 +1224,34 @@ fn gpt2_update(inout model:GPT2, learning_rate:FLOAT, beta1:FLOAT, beta2:FLOAT, 
         memset_zero(model.m_memory,model.num_parameters.to_int())
         memset_zero(model.v_memory,model.num_parameters.to_int())
 
-   
+    var num_parallelize = NUM_PARALLELIZE 
+    var num_vectorize = model.num_parameters / num_parallelize
+
     @parameter
-    fn _op[width: Int](iv: Int):
-        var param = model.params_memory.load[width=width](iv)
-        var grad = model.grads_memory.load[width=width](iv)
+    fn _calc(ip:Int):
+        @parameter
+        fn _op[width: Int](_iv: Int):
 
-        # update the first moment (momentum)
-        var m = beta1 * model.m_memory.load[width=width](iv) + (1.0 - beta1) * grad
-        # update the second moment (RMSprop)
-        var v = beta2 * model.v_memory.load[width=width](iv) + (1.0 - beta2) * grad * grad
-        # bias-correct both moments
-        var m_hat = m / (1.0 - pow(beta1, t))
-        var v_hat = v / (1.0 - pow(beta2, t))
+            var iv = ip*num_vectorize + _iv
+            var param = model.params_memory.load[width=width](iv)
+            var grad = model.grads_memory.load[width=width](iv)
 
-        # update
-        model.m_memory.store[width=width](iv, m)
-        model.v_memory.store[width=width](iv,v)
-        model.params_memory.store[width=width](iv,model.params_memory.load[width=width](iv) - learning_rate * (m_hat / (sqrt(v_hat) + eps) + weight_decay * param))
-    
+            # update the first moment (momentum)
+            var m = beta1 * model.m_memory.load[width=width](iv) + (1.0 - beta1) * grad
+            # update the second moment (RMSprop)
+            var v = beta2 * model.v_memory.load[width=width](iv) + (1.0 - beta2) * grad * grad
+            # bias-correct both moments
+            var m_hat = m / (1.0 - pow(beta1, t))
+            var v_hat = v / (1.0 - pow(beta2, t))
 
-    vectorize[_op, SIMD_WIDTH](size=model.num_parameters.to_int())
+            # update
+            model.m_memory.store[width=width](iv, m)
+            model.v_memory.store[width=width](iv,v)
+            model.params_memory.store[width=width](iv,model.params_memory.load[width=width](iv) - learning_rate * (m_hat / (sqrt(v_hat) + eps) + weight_decay * param))
+        
+        vectorize[_op, SIMD_WIDTH](num_vectorize.to_int())
+
+    parallelize[_calc](num_parallelize,num_parallelize)
 
     #for i in range(model.num_parameters):
     #    var param:FLOAT = model.params_memory[i]
@@ -1360,6 +1440,7 @@ struct Tokenizer:
                 self.token_table.append(str)
 
         file.close()
+        header.free()
         self.init_ok = 1
 
     fn decode(self, token_id:Int) -> String:
@@ -1469,14 +1550,14 @@ fn main() raises:
                 var coin:FLOAT = random_f32(rng_state)
                 var next_token:Int = sample_mult(probs, model.config.vocab_size, coin).to_int()
                 gen_tokens[t] = next_token
-
                 # print the generated token, either using the Tokenizer or a fallback
                 if tokenizer.init_ok:
                     var token_str:String = tokenizer.decode(next_token)
                     tokenizer.safe_printf(token_str)
+                
                 else:
                     # fall back to printing the token id
-                    print("%d ", next_token)
+                    print(next_token,end=" ")
 
             print("\n---")
                   
