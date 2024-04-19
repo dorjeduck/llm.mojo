@@ -13,6 +13,8 @@ Visit [llm.c](https://github.com/karpathy/llm.c) for a detailed explanation of t
 
 ### Step 1: Install python requirements
 
+Before running the following python scripts, ensure that PyTorch is installed on your system. Additionally, install all other required Python packages with the following command:
+
 ```bash
 pip install -r requirements.txt
 ```
