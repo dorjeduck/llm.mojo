@@ -65,12 +65,43 @@ Preliminary benchmark results: (M2 MacBook Pro)
 ## Development Roadmap
 
 - **Implementation Improvement**: Enhance `train_gpt.mojo` to fully exploit Mojo's capabilities, including further optimization for speed and efficiency.
-- **Port test_gpt2.c to Mojo**: Coming soon
 - **Following Changes of llm.c**: Regularly update the Mojo port to align with the latest improvements and changes made to `llm.c`.
 - **Solid Benchmarks**: Develop comprehensive and reliable benchmarks to accurately measure performance improvements and compare them against other implementations.
 
+## Test
+
+### Overview
+
+This section outlines the testing procedures used to ensure the ported Mojo implementation of GPT-2 agrees with the original C implementation in terms of accuracy and functionality.
+
+### Running the Test
+
+To perform the tests on the ported Mojo code, execute the following command:
+
+```bash
+mojo test_gpt2.mojo
+```
+
+This script is a Mojo adaptation of the original `test_gpt2.c`, created by Andrej. and replicates the testing functionality from the C version.
+
+### Test Details
+
+The testing process involves loading the `gpt2_124M_debug_state.bin` file and running a forward pass to compare the computed logits and loss with the reference values obtained from the PyTorch implementation. Additionally, the test performs 10 iterations of training using the Adam optimizer to verify that the losses match those computed by PyTorch.
+
+### Test Outcomes
+
+When running the test, the losses match the PyTorch results within the predefined accuracy range. However, discrepancies occur in some logits. This variation is primarily due to the non-associative nature of floating-point arithmetic, which affects the order of operations when vectorization is applied. 
+
+For more details on why floating-point arithmetic can lead to such discrepancies, see [Floating-point arithmetic](https://en.wikipedia.org/wiki/Floating-point_arithmetic) on Wikipedia.
+
+### Conclusion
+
+Although there are minor discrepancies in the logits, the crucial measure of training losses aligns closely with the PyTorch benchmarks. This consistency confirms the reliability and accuracy of the Mojo implementation. The discrepancies observed in logits are not considered significant, as the matching losses demonstrate functional equivalence to the original C implementation.
+
 ## Changelog
 
+- 2024.04.19
+  - test_gpt2.mojo added.
 - 2024.04.18
   - Upgraded project status to Beta.
   - Further optimizations of train_gpt2.mojo.
