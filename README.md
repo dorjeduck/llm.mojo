@@ -45,11 +45,13 @@ python train_gpt2.py
 
 ### Step 4: Train the Model
 
-Train your model using the downloaded and tokenized data by running:
+Ensure Mojo is installed by following the [Get started with Mojo 🔥](https://docs.modular.com/mojo/manual/get-started/) guide. Train your model by running:
 
  ```bash
  mojo train_gpt.mojo
  ```
+
+This command starts the training process using the prepared data.
 
 ## Benchmarks
 
