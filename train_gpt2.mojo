@@ -35,22 +35,11 @@ alias SIZEOF_FLOAT = sizeof[DType.float32]()
 
 alias NUM_PARALLELIZE = 8
 
-## helper functions not in the original llm.c
-
-fn count_divisions_by_two(n:Int) -> Int:
-    if n == 0:
-        return 0  
-    var _n  = n# Edge case, as zero cannot be divided by two
-    var count = 0
-    while _n & 1 == 0:
-        _n >>= 1
-        count += 1
-    return count
 
 ## ----------------------------------------------------------------------------
 # all the individual layers' forward and backward passes
 
-fn encoder_forward(out:DTypePointer[dtype], inp:DTypePointer[dtype_int], wte:DTypePointer[dtype], wpe:DTypePointer[dtype],B:Int32,T:Int32,C:Int32):
+fn encoder_forward(out:DTypePointer[dtype], inp:DTypePointer[dtype_int], wte:DTypePointer[dtype], wpe:DTypePointer[dtype],B:Int,T:Int,C:Int):
     
     @parameter
     fn _calc(b:Int):
@@ -58,7 +47,7 @@ fn encoder_forward(out:DTypePointer[dtype], inp:DTypePointer[dtype_int], wte:DTy
             # seek to the output position in out[b,t,:]
             var out_bt:DTypePointer[dtype] = out + b * T * C + t * C
             # get the index of the token at inp[b, t]
-            var ix:Int32 = inp[b * T + t]
+            var ix  = inp[b * T + t]
             # seek to the position in wte corresponding to the token
             var wte_ix:DTypePointer[dtype] = wte + ix * C
             # seek to the position in wpe corresponding to the position
@@ -68,15 +57,15 @@ fn encoder_forward(out:DTypePointer[dtype], inp:DTypePointer[dtype_int], wte:DTy
             @parameter
             fn _op[width: Int](iv: Int):
                 out_bt.store[width=width](iv,wte_ix.load[width=width](iv)+ wpe_t.load[width=width](iv))
-            vectorize[_op, SIMD_WIDTH](size=C.to_int())
-    parallelize[_calc](B.to_int(), B.to_int())  
+            vectorize[_op, SIMD_WIDTH](size=C)
+    parallelize[_calc](B, B)  
              
-fn encoder_backward(dwte:DTypePointer[dtype], dwpe:DTypePointer[dtype],dout:DTypePointer[dtype], inp:DTypePointer[dtype_int],B:Int32,T:Int32,C:Int32):
+fn encoder_backward(dwte:DTypePointer[dtype], dwpe:DTypePointer[dtype],dout:DTypePointer[dtype], inp:DTypePointer[dtype_int],B:Int,T:Int,C:Int):
     @parameter
     fn _calc(b:Int):
         for t in range(T):
             var dout_bt:DTypePointer[dtype] = dout + b * T * C + t * C
-            var ix:Int32 = inp[b * T + t]
+            var ix = inp[b * T + t]
             var dwte_ix:DTypePointer[dtype] = dwte + ix * C
             var dwpe_t:DTypePointer[dtype] = dwpe + t * C
             
@@ -85,11 +74,11 @@ fn encoder_backward(dwte:DTypePointer[dtype], dwpe:DTypePointer[dtype],dout:DTyp
                 var d = dout_bt.load[width=width](iv)
                 dwte_ix.store[width=width](iv,dwte_ix.load[width=width](iv)+ d)
                 dwpe_t.store[width=width](iv,dwpe_t.load[width=width](iv)+ d)
-            vectorize[_op, SIMD_WIDTH](size=C.to_int())
-    parallelize[_calc](B.to_int(), B.to_int())  
+            vectorize[_op, SIMD_WIDTH](size=C)
+    parallelize[_calc](B,B)  
             
     
-fn layernorm_forward( out:DTypePointer[dtype],  mean:DTypePointer[dtype], rstd:DTypePointer[dtype],inp:DTypePointer[dtype], weight:DTypePointer[dtype], bias:DTypePointer[dtype],B:Int32,T:Int32,C:Int32):
+fn layernorm_forward( out:DTypePointer[dtype],  mean:DTypePointer[dtype], rstd:DTypePointer[dtype],inp:DTypePointer[dtype], weight:DTypePointer[dtype], bias:DTypePointer[dtype],B:Int,T:Int,C:Int):
    
     var eps:FLOAT = 1e-5
     @parameter
@@ -103,9 +92,9 @@ fn layernorm_forward( out:DTypePointer[dtype],  mean:DTypePointer[dtype], rstd:D
             @parameter
             fn _op[width: Int](iv: Int):
                 m += x.load[width=width](iv).reduce_add[1]()
-            vectorize[_op, SIMD_WIDTH](size=C.to_int())
+            vectorize[_op, SIMD_WIDTH](size=C)
  
-            m = m/C.to_int()
+            m = m/C
 
             # calculate the variance (without any bias correction)
             var v:FLOAT = 0.0
@@ -114,9 +103,9 @@ fn layernorm_forward( out:DTypePointer[dtype],  mean:DTypePointer[dtype], rstd:D
             fn _op2[width: Int](iv: Int):
                 var xshift = x.load[width=width](iv) - m
                 v += pow(xshift,2).reduce_add[1]()
-            vectorize[_op2, SIMD_WIDTH](size=C.to_int())
+            vectorize[_op2, SIMD_WIDTH](size=C)
 
-            v = v/C.to_int()
+            v = v/C
            
             # calculate the rstd
             var s:FLOAT = 1.0 / sqrt(v + eps)
@@ -128,17 +117,17 @@ fn layernorm_forward( out:DTypePointer[dtype],  mean:DTypePointer[dtype], rstd:D
             fn _op3[width: Int](iv: Int):
                 var n = s * (x.load[width=width](iv) - m) # normalized output        
                 out_bt.store[width=width](iv, n * weight.load[width=width](iv) + bias.load[width=width](iv)) # scale and shift it        
-            vectorize[_op3, SIMD_WIDTH](size=C.to_int())
+            vectorize[_op3, SIMD_WIDTH](size=C)
            
             # cache the mean and rstd for the backward pass later
             mean[b * T + t] = m
             rstd[b * T + t] = s
            
-    parallelize[_calc](B.to_int(), B.to_int())  
+    parallelize[_calc](B,B)  
         
 fn layernorm_backward( dinp:DTypePointer[dtype], dweight:DTypePointer[dtype], dbias:DTypePointer[dtype],
                         dout:DTypePointer[dtype], inp:DTypePointer[dtype], weight:DTypePointer[dtype], mean:DTypePointer[dtype], rstd:DTypePointer[dtype],
-                        B:Int32,T:Int32,C:Int32):
+                        B:Int,T:Int,C:Int):
     @parameter
     fn _calc(b:Int):
         for t in range(T):
@@ -158,10 +147,10 @@ fn layernorm_backward( dinp:DTypePointer[dtype], dweight:DTypePointer[dtype], db
                 var dnorm_i = weight.load[width=width](iv) * dout_bt.load[width=width](iv)
                 dnorm_mean += dnorm_i.reduce_add[1]()
                 dnorm_norm_mean += (dnorm_i * norm_bti).reduce_add[1]()    
-            vectorize[_op, SIMD_WIDTH](size=C.to_int())
+            vectorize[_op, SIMD_WIDTH](size=C)
           
-            dnorm_mean = dnorm_mean / C.to_int()
-            dnorm_norm_mean = dnorm_norm_mean / C.to_int()
+            dnorm_mean = dnorm_mean / C
+            dnorm_norm_mean = dnorm_norm_mean / C
             
             # now iterate again and accumulate all the gradients
             
@@ -184,14 +173,14 @@ fn layernorm_backward( dinp:DTypePointer[dtype], dweight:DTypePointer[dtype], db
                     * rstd_bt
                 )
 
-            vectorize[_op2, SIMD_WIDTH](size=C.to_int())
+            vectorize[_op2, SIMD_WIDTH](size=C)
 
-    parallelize[_calc](B.to_int(), B.to_int())  
+    parallelize[_calc](B,B)  
             
 
 fn matmul_forward( out:DTypePointer[dtype],
                     inp:DTypePointer[dtype], weight:DTypePointer[dtype], bias:DTypePointer[dtype],
-                    B:Int32,T:Int32,C:Int32,OC:Int32):
+                    B:Int,T:Int,C:Int,OC:Int):
     # most of the running time is spent here and in matmul_backward
     # OC is short for "output channels"
     # inp is (B,T,C), weight is (OC, C), bias is (OC)
@@ -217,14 +206,14 @@ fn matmul_forward( out:DTypePointer[dtype],
                 fn _op[width: Int](iv: Int):
                     var t = inp_bt.load[width=width](iv) * wrow.load[width=width](iv) 
                     val += t.reduce_add[1]()
-                vectorize[_op, SIMD_WIDTH](size=C.to_int())
+                vectorize[_op, SIMD_WIDTH](size=C)
 
                 out_bt[o] = val
-    parallelize[_calc](B.to_int(), B.to_int())  
+    parallelize[_calc](B,B)  
 
 fn matmul_backward( dinp:DTypePointer[dtype], dweight:DTypePointer[dtype], dbias:DTypePointer[dtype],
                       dout:DTypePointer[dtype], inp:DTypePointer[dtype], weight:DTypePointer[dtype],
-                     B:Int32,T:Int32,C:Int32,OC:Int32):
+                     B:Int,T:Int,C:Int,OC:Int):
     # most of the running time is spent here and in matmul_forward
     # this backward could be done in a single "round" of loops
     # but that doesn't afford an efficient parallelization strategy
@@ -244,9 +233,9 @@ fn matmul_backward( dinp:DTypePointer[dtype], dweight:DTypePointer[dtype], dbias
                 @parameter
                 fn _op[width: Int](iv: Int):
                     dinp_bt.store[width=width](iv,dinp_bt.load[width=width](iv) + wrow.load[width=width](iv)*d) # scale and shift it        
-                vectorize[_op, SIMD_WIDTH](size=C.to_int())
+                vectorize[_op, SIMD_WIDTH](size=C)
             
-    parallelize[_calc](B.to_int(), B.to_int()) 
+    parallelize[_calc](B,B) 
     # backward into weight/bias, parallelize over output channels OC
     #pragma omp parallel for
     
@@ -264,19 +253,19 @@ fn matmul_backward( dinp:DTypePointer[dtype], dweight:DTypePointer[dtype], dbias
                 @parameter
                 fn _op[width: Int](iv: Int):
                     dwrow.store[width=width](iv,dwrow.load[width=width](iv) + inp_bt.load[width=width](iv)*d) # scale and shift it        
-                vectorize[_op, SIMD_WIDTH](size=C.to_int())
+                vectorize[_op, SIMD_WIDTH](size=C)
 
-    parallelize[_calc2](OC.to_int(), OC.to_int())       
+    parallelize[_calc2](OC, OC)       
                 
 fn attention_forward( out:DTypePointer[dtype], preatt:DTypePointer[dtype], att:DTypePointer[dtype],
                         inp:DTypePointer[dtype],
-                       B:Int32,T:Int32,C:Int32,NH:Int32):
+                       B:Int,T:Int,C:Int,NH:Int):
     # input is (B, T, 3C) Q,K,V
     # preatt, att are (B, NH, T, T)
     # output is (B, T, C)
-    var C3:Int32 = C*3
-    var hs:Int32 = C / NH # head size
-    var scale:FLOAT = 1.0 / sqrt(hs.cast[dtype]())
+    var C3:Int = C*3
+    var hs:Int = C // NH # head size
+    var scale:FLOAT = 1.0 / sqrt(hs)
 
     #pragma omp parallel for collapse(3)
     @parameter
@@ -304,7 +293,7 @@ fn attention_forward( out:DTypePointer[dtype], preatt:DTypePointer[dtype], att:D
                     fn _op[width: Int](iv: Int):
                         var t = query_t.load[width=width](iv) * key_t2.load[width=width](iv) 
                         val += t.reduce_add[1]()
-                    vectorize[_op, SIMD_WIDTH](size=hs.to_int())
+                    vectorize[_op, SIMD_WIDTH](size=hs)
 
                     val *= scale
                     if (val > maxval):
@@ -332,7 +321,7 @@ fn attention_forward( out:DTypePointer[dtype], preatt:DTypePointer[dtype], att:D
                 fn _op3[width:Int](t2:Int):
                     att_bth.store[width=width](t2, att_bth.load[width=width](t2)*expsum_inv)
                 vectorize[_op3,SIMD_WIDTH](size=t+1)
-                memset_zero(att_bth+t+1,(T-t-1).to_int())
+                memset_zero(att_bth+t+1,T-t-1)
                 
 
                 #for t2 in range(T):
@@ -347,7 +336,7 @@ fn attention_forward( out:DTypePointer[dtype], preatt:DTypePointer[dtype], att:D
                 var out_bth:DTypePointer[dtype] = out + b * T * C + t * C + h * hs
                 #for i in range(hs): 
                 #    out_bth[i] = 0.0 
-                memset_zero(out_bth,hs.to_int())
+                memset_zero(out_bth,hs)
                 
                 for t2 in range(t+1):
                     var value_t2 = inp + b * T * C3 + t2 * C3 + h * hs + C*2 # +C*2 because it's value
@@ -361,19 +350,19 @@ fn attention_forward( out:DTypePointer[dtype], preatt:DTypePointer[dtype], att:D
                             + att_btht2 * value_t2.load[width=width](iv)
                         )
                     
-                    vectorize[_op4, SIMD_WIDTH](size=hs.to_int())
+                    vectorize[_op4, SIMD_WIDTH](size=hs)
                    
-    parallelize[_calc](B.to_int(), B.to_int())                   
+    parallelize[_calc](B,B)                   
                    
 fn attention_backward( dinp:DTypePointer[dtype], dpreatt:DTypePointer[dtype], datt:DTypePointer[dtype],
                         dout:DTypePointer[dtype], inp:DTypePointer[dtype], att:DTypePointer[dtype],
-                        B:Int32,T:Int32,C:Int32,NH:Int32):
+                        B:Int,T:Int,C:Int,NH:Int):
     # inp/dinp are (B, T, 3C) Q,K,V
     # att/datt/dpreatt are (B, NH, T, T)
     # dout is (B, T, C)
-    var C3:Int32 = C*3
-    var hs:Int32 = C / NH # head size
-    var scale:FLOAT = 1.0 / sqrt(hs.cast[dtype]())
+    var C3:Int = C*3
+    var hs:Int = C // NH # head size
+    var scale:FLOAT = 1.0 / sqrt(hs)
 
     @parameter
     fn _calc(b:Int):
@@ -406,7 +395,7 @@ fn attention_backward( dinp:DTypePointer[dtype], dpreatt:DTypePointer[dtype], da
                         # so now we have:
                         datt_bth[t2] += (value_t2.load[width=width](iv)  * dout_bth.load[width=width](iv)).reduce_add[1]() 
                         dvalue_t2.store[width=width](iv,dvalue_t2.load[width=width](iv)  + att_bth[t2] * dout_bth.load[width=width](iv)) 
-                    vectorize[_op, SIMD_WIDTH](size=hs.to_int())
+                    vectorize[_op, SIMD_WIDTH](size=hs)
                      
                 # backward pass 2 & 3, the softmax
                 # note that softmax (like e.g. tanh) doesn't need the input (preatt) to backward
@@ -440,15 +429,15 @@ fn attention_backward( dinp:DTypePointer[dtype], dpreatt:DTypePointer[dtype], da
                         dquery_t.store[width=width](iv,dquery_t.load[width=width](iv) + key_t2.load[width=width](iv) * dpreatt_bth[t2] * scale)
                         dkey_t2.store[width=width](iv,dkey_t2.load[width=width](iv) + query_t.load[width=width](iv) * dpreatt_bth[t2] * scale)
                      
-                    vectorize[_op2, SIMD_WIDTH](size=hs.to_int())
+                    vectorize[_op2, SIMD_WIDTH](size=hs)
     
-    parallelize[_calc](B.to_int(),B.to_int())
+    parallelize[_calc](B,B)
                     
 
-fn gelu_forward( out:DTypePointer[dtype], inp:DTypePointer[dtype],N:Int32):
+fn gelu_forward( out:DTypePointer[dtype], inp:DTypePointer[dtype],N:Int):
     var s:FLOAT  = sqrt(2.0 / M_PI)
 
-    var num_vectorize = N / NUM_PARALLELIZE
+    var num_vectorize = N // NUM_PARALLELIZE
 
     @parameter
     fn _calc(ip:Int):
@@ -460,13 +449,13 @@ fn gelu_forward( out:DTypePointer[dtype], inp:DTypePointer[dtype],N:Int32):
             var cube = 0.044715 * pow(x,3) 
             out.store[width=width](iv,0.5 * x * (1.0 + tanh(s * (x + cube))))
                     
-        vectorize[_op, SIMD_WIDTH](num_vectorize.to_int())
+        vectorize[_op, SIMD_WIDTH](num_vectorize)
     parallelize[_calc](NUM_PARALLELIZE,NUM_PARALLELIZE)
 
 
-fn gelu_backward( dinp:DTypePointer[dtype], inp:DTypePointer[dtype], dout:DTypePointer[dtype],N:Int32):
+fn gelu_backward( dinp:DTypePointer[dtype], inp:DTypePointer[dtype], dout:DTypePointer[dtype],N:Int):
     var s:FLOAT = sqrt(2.0 / M_PI)
-    var num_vectorize = N / NUM_PARALLELIZE
+    var num_vectorize = N // NUM_PARALLELIZE
   
     @parameter
     fn _calc(ip:Int):
@@ -483,11 +472,11 @@ fn gelu_backward( dinp:DTypePointer[dtype], inp:DTypePointer[dtype], dout:DTypeP
             var local_grad = 0.5 * (1.0 + tanh_out) + x * 0.5 * sech_out * s * (1.0 + 3.0 * 0.044715 * x * x)
             dinp.store[width=width](iv,dinp.load[width=width](iv) + local_grad * dout.load[width=width](iv))
         
-        vectorize[_op, SIMD_WIDTH](num_vectorize.to_int())
+        vectorize[_op, SIMD_WIDTH](num_vectorize)
     parallelize[_calc](NUM_PARALLELIZE,NUM_PARALLELIZE)
    
-fn residual_forward( out:DTypePointer[dtype], inp1:DTypePointer[dtype], inp2:DTypePointer[dtype],N:Int32):
-    var num_vectorize = N / NUM_PARALLELIZE
+fn residual_forward( out:DTypePointer[dtype], inp1:DTypePointer[dtype], inp2:DTypePointer[dtype],N:Int):
+    var num_vectorize = N // NUM_PARALLELIZE
 
     @parameter
     fn _calc(ip:Int):
@@ -495,12 +484,12 @@ fn residual_forward( out:DTypePointer[dtype], inp1:DTypePointer[dtype], inp2:DTy
         fn _op[width: Int](_iv: Int):
             var iv = ip*num_vectorize + _iv
             out.store[width=width](iv,inp1.load[width=width](iv) + inp2.load[width=width](iv)) # scale and shift it        
-        vectorize[_op, SIMD_WIDTH](num_vectorize.to_int())
+        vectorize[_op, SIMD_WIDTH](num_vectorize)
     parallelize[_calc](NUM_PARALLELIZE,NUM_PARALLELIZE)
 
-fn residual_backward( dinp1:DTypePointer[dtype], dinp2:DTypePointer[dtype], dout:DTypePointer[dtype],N:Int32):
+fn residual_backward( dinp1:DTypePointer[dtype], dinp2:DTypePointer[dtype], dout:DTypePointer[dtype],N:Int):
     
-    var num_vectorize = N / NUM_PARALLELIZE
+    var num_vectorize = N // NUM_PARALLELIZE
 
     @parameter
     fn _calc(ip:Int):
@@ -511,11 +500,11 @@ fn residual_backward( dinp1:DTypePointer[dtype], dinp2:DTypePointer[dtype], dout
             dinp1.store[width=width](iv,dinp1.load[width=width](iv) + dout.load[width=width](iv)) # scale and shift it        
             dinp2.store[width=width](iv,dinp2.load[width=width](iv) + dout.load[width=width](iv)) # scale and shift it        
   
-        vectorize[_op, SIMD_WIDTH](num_vectorize.to_int())
+        vectorize[_op, SIMD_WIDTH](num_vectorize)
     parallelize[_calc](NUM_PARALLELIZE,NUM_PARALLELIZE)
 
 
-fn softmax_forward( probs:DTypePointer[dtype], logits:DTypePointer[dtype],B:Int32,T:Int32,V:Int32):
+fn softmax_forward( probs:DTypePointer[dtype], logits:DTypePointer[dtype],B:Int,T:Int,V:Int):
     # output: probs are (B,T,V) of the probabilities
     # input: logits is (B,T,V) of the unnormalized log probabilities
     #pragma omp parallel for collapse(2)
@@ -543,20 +532,20 @@ fn softmax_forward( probs:DTypePointer[dtype], logits:DTypePointer[dtype],B:Int3
             fn _op[width: Int](iv: Int):
                 probs_bt.store[width=width](iv,exp(logits_bt.load[width=width](iv)-maxval))
                 sum += probs_bt.load[width=width](iv).reduce_add[1]()
-            vectorize[_op, SIMD_WIDTH](size=V.to_int())
+            vectorize[_op, SIMD_WIDTH](size=V)
 
             @parameter
             fn _op2[width: Int](iv: Int):
                 probs_bt.store[width=width](iv,probs_bt.load[width=width](iv)/sum) # scale and shift it        
-            vectorize[_op2, SIMD_WIDTH](size=V.to_int())
+            vectorize[_op2, SIMD_WIDTH](size=V)
     
-    parallelize[_calc](B.to_int(),B.to_int())
+    parallelize[_calc](B,B)
 
             
             
 fn crossentropy_forward( losses:DTypePointer[dtype],
                         probs:DTypePointer[dtype], targets:DTypePointer[dtype_int],
-                          B:Int32,T:Int32,V:Int32):
+                          B:Int,T:Int,V:Int):
     # output: losses is (B,T) of the individual losses at each position
     # input: probs are (B,T,V) of the probabilities
     # input: targets is (B,T) of integers giving the correct index in logits
@@ -566,14 +555,14 @@ fn crossentropy_forward( losses:DTypePointer[dtype],
         for t in range(T): #todo
             # loss = -log(probs[target])
             var probs_bt:DTypePointer[dtype] = probs + b * T * V + t * V
-            var ix:Int32 = targets[b * T + t]
+            var ix = targets[b * T + t]
             losses[b * T + t] = -log(probs_bt[ix])
     
-    parallelize[_calc](B.to_int(),B.to_int())
+    parallelize[_calc](B,B)
 
 fn crossentropy_softmax_backward( dlogits:DTypePointer[dtype],
                         dlosses:DTypePointer[dtype], probs:DTypePointer[dtype], targets:DTypePointer[dtype_int],
-                           B:Int32,T:Int32,V:Int32):
+                           B:Int,T:Int,V:Int):
     # backwards through both softmax and crossentropy
     
     @parameter
@@ -582,14 +571,14 @@ fn crossentropy_softmax_backward( dlogits:DTypePointer[dtype],
             var dlogits_bt:DTypePointer[dtype] = dlogits + b * T * V + t * V
             var probs_bt:DTypePointer[dtype] = probs + b * T * V + t * V
             var dloss:FLOAT = dlosses[b * T + t]
-            var ix:Int32 = targets[b * T + t]
+            var ix = targets[b * T + t]
 
             @parameter
             fn _op[width:Int](iv:Int):
                 dlogits_bt.store[width=width](iv,dlogits_bt.load[width=width](iv) + probs_bt.load[width=width](iv) * dloss)
-            vectorize[_op,SIMD_WIDTH](size=V.to_int())
+            vectorize[_op,SIMD_WIDTH](size=V)
             
-            if ix >= 0 and ix < V.to_int():
+            if ix >= 0 and ix < V:
                 dlogits_bt[ix] -=  dloss
             
             #for i in range(V):
@@ -599,7 +588,7 @@ fn crossentropy_softmax_backward( dlogits:DTypePointer[dtype],
             #    dlogits_bt[i] += (probs_bt[i] - indicator) * dloss
          
 
-    parallelize[_calc](B.to_int(),B.to_int())
+    parallelize[_calc](B,B)
             
 # ----------------------------------------------------------------------------
 # GPT-2 model definition
@@ -650,15 +639,15 @@ struct ParameterTensors:
         self.lnfw = DTypePointer[dtype]()
         self.lnfb = DTypePointer[dtype]()
 
-    fn alloc_and_point_parameters(inout self,param_sizes: InlinedFixedVector[type=Int32, size=NUM_PARAMETER_TENSORS]) -> DTypePointer[dtype]:
+    fn alloc_and_point_parameters(inout self,param_sizes: InlinedFixedVector[type=Int, size=NUM_PARAMETER_TENSORS]) -> DTypePointer[dtype]:
 
-        var num_parameters: Int64 = 0
+        var num_parameters: Int = 0
         
         for i in range(NUM_PARAMETER_TENSORS):
-            num_parameters += param_sizes[i].cast[DType.int64]()
+            num_parameters += param_sizes[i]
 
         # malloc all parameters all at once
-        self.params_memory = DTypePointer[dtype]().alloc(num_parameters.to_int())
+        self.params_memory = DTypePointer[dtype]().alloc(num_parameters)
         # assign all the tensors
 
         var ptrs = List(
@@ -745,7 +734,7 @@ struct ActivationTensors:
         self.probs = DTypePointer[dtype]()
         self.losses = DTypePointer[dtype]()
     
-    fn alloc_and_point_activations(inout self,act_sizes: InlinedFixedVector[type=Int32, size=NUM_ACTIVATION_TENSORS]) -> DTypePointer[dtype]:
+    fn alloc_and_point_activations(inout self,act_sizes: InlinedFixedVector[type=Int, size=NUM_ACTIVATION_TENSORS]) -> DTypePointer[dtype]:
 
         var ptrs = List(
             Pointer.address_of(self.encoded),
@@ -773,12 +762,12 @@ struct ActivationTensors:
             Pointer.address_of(self.losses),
         )
 
-        var num_activations: Int64 = 0
+        var num_activations: Int = 0
 
         for i in range(NUM_ACTIVATION_TENSORS):
-            num_activations += act_sizes[i].cast[DType.int64]()
+            num_activations += act_sizes[i]
 
-        var acts_memory = DTypePointer[dtype]().alloc(num_activations.to_int())
+        var acts_memory = DTypePointer[dtype]().alloc(num_activations)
 
         var acts_memory_iterator: DTypePointer[dtype] = acts_memory
         for i in range(NUM_ACTIVATION_TENSORS):
@@ -789,19 +778,19 @@ struct ActivationTensors:
 
 @value
 struct GPT2Config:
-    var max_seq_len: Int32  # max sequence length, e.g. 1024
-    var vocab_size: Int32  # vocab size, e.g. 50257
-    var num_layers: Int32  # number of layers, e.g. 12
-    var num_heads: Int32  # number of heads in attention, e.g. 12
-    var channels: Int32  # number of channels, e.g. 768
+    var max_seq_len: Int  # max sequence length, e.g. 1024
+    var vocab_size: Int  # vocab size, e.g. 50257
+    var num_layers: Int  # number of layers, e.g. 12
+    var num_heads: Int  # number of heads in attention, e.g. 12
+    var channels: Int  # number of channels, e.g. 768
 
 struct GPT2:
     var config: GPT2Config
     # the weights of the model, and their sizes
     var params: ParameterTensors
-    var param_sizes: InlinedFixedVector[type=Int32, size=NUM_PARAMETER_TENSORS]
+    var param_sizes: InlinedFixedVector[type=Int, size=NUM_PARAMETER_TENSORS]
     var params_memory: DTypePointer[dtype]
-    var num_parameters: Int64
+    var num_parameters: Int
     # gradients of the weights
     var grads: ParameterTensors
     var grads_memory: DTypePointer[dtype]
@@ -810,15 +799,15 @@ struct GPT2:
     var v_memory: DTypePointer[dtype]
     # the activations of the model, and their sizes
     var acts: ActivationTensors
-    var act_sizes: InlinedFixedVector[type=Int32, size=NUM_ACTIVATION_TENSORS]
+    var act_sizes: InlinedFixedVector[type=Int, size=NUM_ACTIVATION_TENSORS]
     var acts_memory: DTypePointer[dtype]
-    var num_activations: Int64
+    var num_activations: Int
     # gradients of the activations
     var grads_acts: ActivationTensors
     var grads_acts_memory: DTypePointer[dtype]
     # other run state configuration
-    var batch_size: INT  # the batch size (B) of current forward pass
-    var seq_len: INT  # the sequence length (T) of current forward pass
+    var batch_size: Int  # the batch size (B) of current forward pass
+    var seq_len: Int  # the sequence length (T) of current forward pass
     var inputs: DTypePointer[dtype_int]  # the input tokens for the current forward pass
     var targets: DTypePointer[
         dtype_int
@@ -829,10 +818,10 @@ struct GPT2:
     fn __init__(inout self, checkpoint_path: StringRef) raises:
         self.checkpoint_path = checkpoint_path
 
-        self.param_sizes = InlinedFixedVector[type=Int32, size=NUM_PARAMETER_TENSORS](
+        self.param_sizes = InlinedFixedVector[type=Int, size=NUM_PARAMETER_TENSORS](
             NUM_PARAMETER_TENSORS
         )
-        self.act_sizes = InlinedFixedVector[type=Int32, size=NUM_ACTIVATION_TENSORS](
+        self.act_sizes = InlinedFixedVector[type=Int, size=NUM_ACTIVATION_TENSORS](
             NUM_ACTIVATION_TENSORS
         )
 
@@ -854,18 +843,18 @@ struct GPT2:
         # read in hyperparameters
 
         self.config = GPT2Config(
-            model_header[2].cast[DType.int32](),
-            model_header[3].cast[DType.int32](),
-            model_header[4].cast[DType.int32](),
-            model_header[5].cast[DType.int32](),
-            model_header[6].cast[DType.int32](),
+            model_header[2].to_int(),
+            model_header[3].to_int(),
+            model_header[4].to_int(),
+            model_header[5].to_int(),
+            model_header[6].to_int(),
         )
 
-        var maxT: Int32 = self.config.max_seq_len
-        var V: Int32 = self.config.vocab_size
-        var L: Int32 = self.config.num_layers
-        var NH: Int32 = self.config.num_heads
-        var C: Int32 = self.config.channels
+        var maxT: Int = self.config.max_seq_len
+        var V: Int = self.config.vocab_size
+        var L: Int = self.config.num_layers
+        var NH: Int = self.config.num_heads
+        var C: Int = self.config.channels
 
         print("[GPT-2]")
         print("max_seq_len:", self.config.max_seq_len)
@@ -893,10 +882,10 @@ struct GPT2:
         self.param_sizes[15] = C
 
         # cound the number of paramaters
-        var num_parameters: Int64 = 0
+        var num_parameters: Int = 0
 
         for i in range(NUM_PARAMETER_TENSORS):
-            num_parameters += self.param_sizes[i].cast[DType.int64]()
+            num_parameters += self.param_sizes[i]
 
         print("num_parameters:", num_parameters)
         self.num_parameters = num_parameters
@@ -906,12 +895,12 @@ struct GPT2:
         self.params = ParameterTensors()
         self.params_memory = self.params.alloc_and_point_parameters(self.param_sizes)
         
-        var data_raw = model_file.read( (num_parameters * SIZEOF_FLOAT).to_int())
+        var data_raw = model_file.read( num_parameters * SIZEOF_FLOAT)
         
         model_file.close()
 
         var float32_ptr= data_raw._steal_ptr().bitcast[DType.float32]()
-        memcpy(dest=self.params_memory,src=float32_ptr,count=(num_parameters).to_int())
+        memcpy(dest=self.params_memory,src=float32_ptr,count=num_parameters)
 
         # other inits
         self.acts = ActivationTensors()
@@ -932,7 +921,7 @@ struct GPT2:
         self.grads_acts = ActivationTensors()
 
 
-fn gpt2_forward(inout model:GPT2, inputs:DTypePointer[dtype_int], targets:DTypePointer[dtype_int],B:Int32,T:Int32):
+fn gpt2_forward(inout model:GPT2, inputs:DTypePointer[dtype_int], targets:DTypePointer[dtype_int],B:Int,T:Int):
     # targets are optional and could be NULL
 
     # ensure the model was initialized or error out
@@ -940,10 +929,10 @@ fn gpt2_forward(inout model:GPT2, inputs:DTypePointer[dtype_int], targets:DTypeP
         print("Error: model was not initialized properly.")
         
     # convenience parameters
-    var V:Int32 = model.config.vocab_size
-    var L:Int32 = model.config.num_layers
-    var NH:Int32 = model.config.num_heads
-    var C:Int32 = model.config.channels
+    var V:Int = model.config.vocab_size
+    var L:Int = model.config.num_layers
+    var NH:Int = model.config.num_heads
+    var C:Int= model.config.channels
 
     # allocate space for all the activations if needed (done here, lazily)
     if(model.acts_memory == NULL):
@@ -976,9 +965,9 @@ fn gpt2_forward(inout model:GPT2, inputs:DTypePointer[dtype_int], targets:DTypeP
         model.act_sizes[21] = B * T * V
         model.act_sizes[22] = B * T
 
-        var num_activations:Int64 = 0
+        var num_activations:Int = 0
         for i in range(NUM_ACTIVATION_TENSORS):
-            num_activations += model.act_sizes[i].cast[DType.int64]()
+            num_activations += model.act_sizes[i]
         
         print("num_activations:", num_activations)
     
@@ -986,22 +975,22 @@ fn gpt2_forward(inout model:GPT2, inputs:DTypePointer[dtype_int], targets:DTypeP
         model.num_activations = num_activations
         # also create memory for caching inputs and targets
        
-        model.inputs = DTypePointer[dtype_int]().alloc((B * T).to_int() )
-        model.targets = DTypePointer[dtype_int]().alloc((B * T).to_int() )
+        model.inputs = DTypePointer[dtype_int]().alloc(B * T) 
+        model.targets = DTypePointer[dtype_int]().alloc(B * T )
     
     else:
         # validate B,T is no larger than what was previously allocated
         # in principle, we could re-allocate a larger chunk of memory, for now we just error out
-        if B > model.batch_size.to_int() or T > model.seq_len.to_int():
+        if B > model.batch_size or T > model.seq_len:
             print("Error: batch size or sequence length is inadequately large")
             #print("Model: B=%d T=%d, Desired: B=%d T=%d\n", model.batch_size, model.seq_len, B, T)
             
    
     # cache the inputs/targets
-    memcpy(model.inputs, inputs, (B * T).to_int())
+    memcpy(model.inputs, inputs, B * T)
 
     if targets != NULL_INT:
-        memcpy(model.targets, targets, (B * T).to_int())
+        memcpy(model.targets, targets, B * T)
     
     # forward pass
     
@@ -1072,7 +1061,7 @@ fn gpt2_forward(inout model:GPT2, inputs:DTypePointer[dtype_int], targets:DTypeP
         var mean_loss:FLOAT = 0.0
         for i in range(B*T):
              mean_loss += model.acts.losses[i] 
-        mean_loss /= (B*T).to_int()
+        mean_loss /= B*T
         model.mean_loss = mean_loss
     else:
         # if we don't have targets, we don't have a loss
@@ -1080,10 +1069,10 @@ fn gpt2_forward(inout model:GPT2, inputs:DTypePointer[dtype_int], targets:DTypeP
     
 fn gpt2_zero_grad(inout model:GPT2):
     if(model.grads_memory != NULL): 
-        memset_zero(model.grads_memory, model.num_parameters.to_int()) 
+        memset_zero(model.grads_memory, model.num_parameters) 
 
     if(model.grads_acts_memory != NULL): 
-        memset_zero(model.grads_acts_memory, model.num_activations.to_int()) 
+        memset_zero(model.grads_acts_memory, model.num_activations) 
 
 fn gpt2_backward(inout model:GPT2):
 
@@ -1098,17 +1087,17 @@ fn gpt2_backward(inout model:GPT2):
         gpt2_zero_grad(model)
     
     # convenience shortcuts
-    var B:Int32 = model.batch_size
-    var T:Int32 = model.seq_len
-    var V:Int32 = model.config.vocab_size
-    var L:Int32 = model.config.num_layers
-    var NH:Int32 = model.config.num_heads
-    var C:Int32 = model.config.channels
+    var B:Int = model.batch_size
+    var T:Int = model.seq_len
+    var V:Int = model.config.vocab_size
+    var L:Int = model.config.num_layers
+    var NH:Int = model.config.num_heads
+    var C:Int = model.config.channels
 
     # backward pass
 
     # we kick off the chain by filling in dlosses with 1.0/(B*T), to get the mean loss
-    var dloss_mean:Float32 = 1.0 / (B*T).to_int()
+    var dloss_mean:Float32 = 1.0 / (B*T)
     
     #for i in range(B*T):
     #    model.grads_acts.losses[i] = dloss_mean 
@@ -1116,7 +1105,7 @@ fn gpt2_backward(inout model:GPT2):
     @parameter 
     fn _op[width:Int](iv:Int):
         model.grads_acts.losses.store[width=width](iv,dloss_mean)
-    vectorize[_op,SIMD_WIDTH]((B*T).to_int())
+    vectorize[_op,SIMD_WIDTH]((B*T))
 
     crossentropy_softmax_backward(model.grads_acts.logits, model.grads_acts.losses, model.acts.probs, model.targets, B, T, V)
     matmul_backward(model.grads_acts.lnf, model.grads.wte, NULL, model.grads_acts.logits, model.acts.lnf, model.params.wte, B, T, C, V)
@@ -1194,19 +1183,18 @@ fn gpt2_backward(inout model:GPT2):
     encoder_backward(model.grads.wte, model.grads.wpe, model.grads_acts.encoded, model.inputs, B, T, C)
 
 
-fn gpt2_update(inout model:GPT2, learning_rate:FLOAT, beta1:FLOAT, beta2:FLOAT, eps:FLOAT, weight_decay:FLOAT,t:Int32):
+fn gpt2_update(inout model:GPT2, learning_rate:FLOAT, beta1:FLOAT, beta2:FLOAT, eps:FLOAT, weight_decay:FLOAT,t:Int):
     # reference: https:#pytorch.org/docs/stable/generated/torch.optim.AdamW.html
 
     # lazily allocate the memory for m_memory and v_memory
     if (model.m_memory == NULL):
-        model.m_memory = DTypePointer[dtype]().alloc(model.num_parameters.to_int())
-        model.v_memory = DTypePointer[dtype]().alloc(model.num_parameters.to_int())
+        model.m_memory = DTypePointer[dtype]().alloc(model.num_parameters)
+        model.v_memory = DTypePointer[dtype]().alloc(model.num_parameters)
 
-        memset_zero(model.m_memory,model.num_parameters.to_int())
-        memset_zero(model.v_memory,model.num_parameters.to_int())
+        memset_zero(model.m_memory,model.num_parameters)
+        memset_zero(model.v_memory,model.num_parameters)
 
-    var num_parallelize = NUM_PARALLELIZE 
-    var num_vectorize = model.num_parameters / num_parallelize
+    var num_vectorize = model.num_parameters // NUM_PARALLELIZE
 
     @parameter
     fn _calc(ip:Int):
@@ -1230,9 +1218,9 @@ fn gpt2_update(inout model:GPT2, learning_rate:FLOAT, beta1:FLOAT, beta2:FLOAT, 
             model.v_memory.store[width=width](iv,v)
             model.params_memory.store[width=width](iv,model.params_memory.load[width=width](iv) - learning_rate * (m_hat / (sqrt(v_hat) + eps) + weight_decay * param))
         
-        vectorize[_op, SIMD_WIDTH](num_vectorize.to_int())
+        vectorize[_op, SIMD_WIDTH](num_vectorize)
 
-    parallelize[_calc](num_parallelize,num_parallelize) 
+    parallelize[_calc](NUM_PARALLELIZE,NUM_PARALLELIZE) 
 
 fn gpt2_free(inout model:GPT2):
     model.params_memory.free()
@@ -1253,19 +1241,19 @@ fn gpt2_free(inout model:GPT2):
 
 struct DataLoader:
     # hyperparameters
-    var B:Int32
-    var T:Int32
+    var B:Int
+    var T:Int
     # input handling and its state
     var filename:StringRef
     var tokens_file:FileHandle
-    var file_size:Int32
-    var current_position:Int32
+    var file_size:Int
+    var current_position:Int
     # output memory
     var batch:DTypePointer[dtype_int]
     var inputs:DTypePointer[dtype_int]
     var targets:DTypePointer[dtype_int]
     # convenience variables
-    var num_batches:Int32
+    var num_batches:Int
 
     fn __init__(inout self):
         self.B = 0
@@ -1279,7 +1267,7 @@ struct DataLoader:
         self.targets = DTypePointer[dtype_int]()
         self.num_batches = 0
 
-fn dataloader_init(inout loader:DataLoader,filename:StringRef,B:Int32,T:Int32) raises:
+fn dataloader_init(inout loader:DataLoader,filename:StringRef,B:Int,T:Int) raises:
     loader.B = B
     loader.T = T
 
@@ -1293,37 +1281,37 @@ fn dataloader_init(inout loader:DataLoader,filename:StringRef,B:Int32,T:Int32) r
     var _os = Python.import_module("os")  
     loader.file_size = int(_os.path.getsize(filename))
 
-    if (loader.file_size < (B * T + 1).to_int() * 4):
+    if (loader.file_size < (B * T + 1) * 4):
         print("Error: file size is too small for the batch size and sequence length\n")
          
     loader.current_position = 0 # start at the beginning
 
     # allocate space for B*T + 1 integers to store the inputs and targets loader.batch = (int*) malloc((B * T + 1) * sizeof(int))
     
-    loader.batch = DTypePointer[dtype_int]().alloc((B * T + 1).to_int())
+    loader.batch = DTypePointer[dtype_int]().alloc(B * T + 1)
     loader.inputs = loader.batch
     loader.targets = loader.batch + 1 # targets are shifted by one
-    loader.num_batches = loader.file_size.to_int() / (B * T * SIZEOF_INT).to_int()
+    loader.num_batches = loader.file_size // (B * T * SIZEOF_INT)
 
 fn dataloader_reset(inout loader:DataLoader):
     loader.current_position = 0
 
 fn dataloader_next_batch(inout loader:DataLoader) raises:
-    var B:Int32 = loader.B
-    var T:Int32 = loader.T
+    var B:Int = loader.B
+    var T:Int = loader.T
 
     # if we are at the end of the file, loop back to the beginning
-    if loader.current_position + ((B*T+1) * SIZEOF_INT).to_int() > loader.file_size:
+    if loader.current_position + ((B*T+1) * SIZEOF_INT) > loader.file_size:
         loader.current_position = 0
         
     # read the B*T+1 integers from the file into batch
-    _ = loader.tokens_file.seek( loader.current_position.to_int())
+    _ = loader.tokens_file.seek( loader.current_position)
     
     # config_data_raw id Tensor[DType.int8] with bytes_of_config_params elements
-    var data_raw = loader.tokens_file.read(((B*T+1) * SIZEOF_INT).to_int())
+    var data_raw = loader.tokens_file.read((B*T+1) * SIZEOF_INT)
     var int32_ptr= data_raw._steal_ptr().bitcast[DType.int32]()
 
-    memcpy(dest=loader.batch,src=int32_ptr,count=(B*T+1).to_int())
+    memcpy(dest=loader.batch,src=int32_ptr,count=B*T+1)
        
     # advance the current position by B*T integers
     loader.current_position += B*T * SIZEOF_INT
@@ -1344,7 +1332,7 @@ fn random_u32(inout state:UInt64) -> UInt32:
 fn random_f32(inout state:UInt64) -> Float32:    
     return (random_u32(state) >> 8).cast[DType.float32]() / RF32_DIV
 
-fn sample_mult( probabilities:DTypePointer[dtype],n:Int32, coin:FLOAT) -> Int32:
+fn sample_mult( probabilities:DTypePointer[dtype],n:Int, coin:FLOAT) -> Int:
     # sample index from probabilities (they must sum to 1!)
     # coin is a random number in [0, 1), usually from random_f32()
     var cdf:FLOAT = 0.0
@@ -1463,23 +1451,23 @@ fn main() raises:
         train_tokens = tiny_stories_train 
         val_tokens = tiny_stories_val
 
-    var B:Int32 = 4
-    var T:Int32 = 64
+    var B:Int = 4
+    var T:Int = 64
     var train_loader = DataLoader() 
     dataloader_init(train_loader, train_tokens, B, T)
     print("train dataset num_batches:", train_loader.num_batches)
     var val_loader = DataLoader() 
     dataloader_init(val_loader, val_tokens, B, T)
     print("val dataset num_batches:", val_loader.num_batches)
-    var val_num_batches:Int32 = 10
+    var val_num_batches:Int = 10
 
     # build the Tokenizer
     var tokenizer = Tokenizer("gpt2_tokenizer.bin")
 
     # some memory for generating samples from the model
     var rng_state:UInt64 = 1337
-    var gen_max_length:Int32 = 64
-    var gen_tokens = DTypePointer[dtype_int]().alloc(gen_max_length.to_int())
+    var gen_max_length:Int = 64
+    var gen_tokens = DTypePointer[dtype_int]().alloc(gen_max_length)
 
     # train
 
@@ -1496,7 +1484,7 @@ fn main() raises:
                 gpt2_forward(model, val_loader.inputs, val_loader.targets, B, T)
                 val_loss += model.mean_loss
             
-            val_loss /= val_num_batches.to_int()
+            val_loss /= val_num_batches
             print("val loss", val_loss)
         
         # once in a while do model inference to prgenerated INT32 text
@@ -1512,7 +1500,7 @@ fn main() raises:
                 gpt2_forward(model, gen_tokens, NULL_INT, 1, t)
                 var probs = model.acts.probs + (t-1) * model.config.vocab_size
                 var coin:FLOAT = random_f32(rng_state)
-                var next_token:Int = sample_mult(probs, model.config.vocab_size, coin).to_int()
+                var next_token:Int = sample_mult(probs, model.config.vocab_size, coin)
                 gen_tokens[t] = next_token
                 # print the generated token, either using the Tokenizer or a fallback
                 if tokenizer.init_ok:
