@@ -65,12 +65,6 @@ Preliminary benchmark results: (M2 MacBook Pro)
 
 ## Test
 
-### Overview
-
-This section outlines the testing procedures used to ensure the ported Mojo implementation of GPT-2 agrees with the original C implementation in terms of accuracy and functionality.
-
-### Running the Test
-
 To perform the tests on the ported Mojo code, execute the following command:
 
 ```bash
