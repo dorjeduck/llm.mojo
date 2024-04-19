@@ -62,11 +62,6 @@ Preliminary benchmark results: (M2 MacBook Pro)
 
 !['Training Loop Times'](imgs/training_loop_times_chart.png)
 
-## Development Roadmap
-
-- **Implementation Improvement**: Enhance `train_gpt.mojo` to fully exploit Mojo's capabilities, including further optimization for speed and efficiency.
-- **Following Changes of llm.c**: Regularly update the Mojo port to align with the latest improvements and changes made to `llm.c`.
-- **Solid Benchmarks**: Develop comprehensive and reliable benchmarks to accurately measure performance improvements and compare them against other implementations.
 
 ## Test
 
@@ -90,14 +85,18 @@ The testing process involves loading the `gpt2_124M_debug_state.bin` file and ru
 
 ### Test Outcomes
 
-When running the test, the losses match the PyTorch results within the predefined accuracy range. However, discrepancies occur in some logits. This variation is primarily due to the non-associative nature of floating-point arithmetic, which affects the order of operations when vectorization is applied. 
-
-For more details on why floating-point arithmetic can lead to such discrepancies, see [Floating-point arithmetic](https://en.wikipedia.org/wiki/Floating-point_arithmetic) on Wikipedia.
+When running the test, the losses match the PyTorch results within the predefined accuracy range. However, discrepancies occur in some logits. These discrepancies arise because the implemented vectorization can change the order of operations, and due to the non-associative nature of floating-point arithmetic, this leads to variations in the outcomes. For more details on why floating-point arithmetic can lead to such discrepancies, see [Floating-point arithmetic](https://en.wikipedia.org/wiki/Floating-point_arithmetic) on Wikipedia.
 
 ### Conclusion
 
 Although there are minor discrepancies in the logits, the crucial measure of training losses aligns closely with the PyTorch benchmarks. This consistency confirms the reliability and accuracy of the Mojo implementation. The discrepancies observed in logits are not considered significant, as the matching losses demonstrate functional equivalence to the original C implementation.
 
+## Development Roadmap
+
+- **Implementation Improvement**: Enhance `train_gpt.mojo` to fully exploit Mojo's capabilities, including further optimization for speed and efficiency.
+- **Following Changes of llm.c**: Regularly update the Mojo port to align with the latest improvements and changes made to `llm.c`.
+- **Solid Benchmarks**: Develop comprehensive and reliable benchmarks to accurately measure performance improvements and compare them against other implementations.
+- 
 ## Changelog
 
 - 2024.04.19
