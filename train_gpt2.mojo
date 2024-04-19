@@ -1,7 +1,7 @@
 from algorithm import vectorize,parallelize
 from collections.vector import InlinedFixedVector
 from math import sqrt,rsqrt,exp,tanh,cosh,log,pow,max
-from memory import memset_zero,memcpy
+from memory import memset,memset_zero,memcpy
 from python import Python
 from time import now
 from sys.info import is_apple_silicon
@@ -18,8 +18,6 @@ alias RU32_HEX = 0x2545F4914F6CDD1D
 alias RF32_DIV = 16777216.0
 alias dtype = DType.float32
 alias FLOAT = SIMD[dtype,1]
-
-
 
 alias dtype_int = DType.int32
 alias INT = SIMD[dtype_int, 1]
@@ -48,8 +46,6 @@ fn count_divisions_by_two(n:Int) -> Int:
         _n >>= 1
         count += 1
     return count
-
-
 
 ## ----------------------------------------------------------------------------
 # all the individual layers' forward and backward passes
@@ -94,7 +90,6 @@ fn encoder_backward(dwte:DTypePointer[dtype], dwpe:DTypePointer[dtype],dout:DTyp
             
     
 fn layernorm_forward( out:DTypePointer[dtype],  mean:DTypePointer[dtype], rstd:DTypePointer[dtype],inp:DTypePointer[dtype], weight:DTypePointer[dtype], bias:DTypePointer[dtype],B:Int32,T:Int32,C:Int32):
-   
    
     var eps:FLOAT = 1e-5
     @parameter
@@ -332,13 +327,21 @@ fn attention_forward( out:DTypePointer[dtype], preatt:DTypePointer[dtype], att:D
                     expsum_inv = 1.0 / expsum
 
                 # pass 3: normalize to get the softmax
-                for t2 in range(T):
-                    if (t2 <= t):
-                        att_bth[t2] *= expsum_inv
-                    else:
-                        # causal attention mask. not strictly necessary to set to zero here
-                        # only doing this explicitly for debugging and checking to PyTorch
-                        att_bth[t2] = 0.0
+
+                @parameter
+                fn _op3[width:Int](t2:Int):
+                    att_bth.store[width=width](t2, att_bth.load[width=width](t2)*expsum_inv)
+                vectorize[_op3,SIMD_WIDTH](size=t+1)
+                memset_zero(att_bth+t+1,(T-t-1).to_int())
+                
+
+                #for t2 in range(T):
+                #    if (t2 <= t):
+                #        att_bth[t2] *= expsum_inv
+                #    else:
+                #        # causal attention mask. not strictly necessary to set to zero here
+                #        # only doing this explicitly for debugging and checking to PyTorch
+                #        att_bth[t2] = 0.0
                     
                 # pass 4: accumulate weighted values into the output of attention
                 var out_bth:DTypePointer[dtype] = out + b * T * C + t * C + h * hs
@@ -351,14 +354,14 @@ fn attention_forward( out:DTypePointer[dtype], preatt:DTypePointer[dtype], att:D
                     var att_btht2:FLOAT = att_bth[t2]
  
                     @parameter
-                    fn _op3[width: Int](iv: Int):
+                    fn _op4[width: Int](iv: Int):
                         out_bth.store[width=width](
                             iv,
                             out_bth.load[width=width](iv) 
                             + att_btht2 * value_t2.load[width=width](iv)
                         )
                     
-                    vectorize[_op3, SIMD_WIDTH](size=hs.to_int())
+                    vectorize[_op4, SIMD_WIDTH](size=hs.to_int())
                    
     parallelize[_calc](B.to_int(), B.to_int())                   
                    
@@ -408,13 +411,20 @@ fn attention_backward( dinp:DTypePointer[dtype], dpreatt:DTypePointer[dtype], da
                 # backward pass 2 & 3, the softmax
                 # note that softmax (like e.g. tanh) doesn't need the input (preatt) to backward
                 for t2 in range(t+1):
-                    for t3 in range(t+1):
-                        var indicator:FLOAT = 0.0
-                        if t2 == t3:
-                            indicator = 1.0
+                    @parameter
+                    fn _op3[width:Int](t3:Int):
+                        var local_derivative = - att_bth[t2] * att_bth.load[width=width](t3)
+                        dpreatt_bth.store[width=width](t3,dpreatt_bth.load[width=width](t3) + local_derivative * datt_bth[t2])
+                    vectorize[_op3,SIMD_WIDTH](size=t+1)
+                    dpreatt_bth[t2] += att_bth[t2] * datt_bth[t2] 
 
-                        var local_derivative:FLOAT = att_bth[t2] * (indicator - att_bth[t3])
-                        dpreatt_bth[t3] += local_derivative * datt_bth[t2]
+                    #for t3 in range(t+1):
+                    #    var indicator:FLOAT = 0.0
+                    #    if t2 == t3:
+                    #        indicator = 1.0
+                    #
+                    #    var local_derivative:FLOAT = att_bth[t2] * (indicator - att_bth[t3])
+                    #    dpreatt_bth[t3] += local_derivative * datt_bth[t2]
                     
                 # backward pass 1, the query @ key matmul
                 for t2 in range(t+1):
@@ -430,7 +440,6 @@ fn attention_backward( dinp:DTypePointer[dtype], dpreatt:DTypePointer[dtype], da
                         dquery_t.store[width=width](iv,dquery_t.load[width=width](iv) + key_t2.load[width=width](iv) * dpreatt_bth[t2] * scale)
                         dkey_t2.store[width=width](iv,dkey_t2.load[width=width](iv) + query_t.load[width=width](iv) * dpreatt_bth[t2] * scale)
                      
-                    
                     vectorize[_op2, SIMD_WIDTH](size=hs.to_int())
     
     parallelize[_calc](B.to_int(),B.to_int())
@@ -452,10 +461,9 @@ fn gelu_forward( out:DTypePointer[dtype], inp:DTypePointer[dtype],N:Int32):
             out.store[width=width](iv,0.5 * x * (1.0 + tanh(s * (x + cube))))
                     
         vectorize[_op, SIMD_WIDTH](num_vectorize.to_int())
-
     parallelize[_calc](NUM_PARALLELIZE,NUM_PARALLELIZE)
 
-   
+
 fn gelu_backward( dinp:DTypePointer[dtype], inp:DTypePointer[dtype], dout:DTypePointer[dtype],N:Int32):
     var s:FLOAT = sqrt(2.0 / M_PI)
     var num_vectorize = N / NUM_PARALLELIZE
@@ -560,6 +568,7 @@ fn crossentropy_forward( losses:DTypePointer[dtype],
             var probs_bt:DTypePointer[dtype] = probs + b * T * V + t * V
             var ix:Int32 = targets[b * T + t]
             losses[b * T + t] = -log(probs_bt[ix])
+    
     parallelize[_calc](B.to_int(),B.to_int())
 
 fn crossentropy_softmax_backward( dlogits:DTypePointer[dtype],
@@ -575,12 +584,20 @@ fn crossentropy_softmax_backward( dlogits:DTypePointer[dtype],
             var dloss:FLOAT = dlosses[b * T + t]
             var ix:Int32 = targets[b * T + t]
 
-            for i in range(V):
-                var p:FLOAT = probs_bt[i]
-                var indicator:FLOAT = 0.0
-                if ix == i:
-                    indicator = 1.0 
-                dlogits_bt[i] += (p - indicator) * dloss
+            @parameter
+            fn _op[width:Int](iv:Int):
+                dlogits_bt.store[width=width](iv,dlogits_bt.load[width=width](iv) + probs_bt.load[width=width](iv) * dloss)
+            vectorize[_op,SIMD_WIDTH](size=V.to_int())
+            
+            if ix >= 0 and ix < V.to_int():
+                dlogits_bt[ix] -=  dloss
+            
+            #for i in range(V):
+            #    var indicator:FLOAT = 0.0
+            #    if ix == i:
+            #        indicator = 1.0 
+            #    dlogits_bt[i] += (probs_bt[i] - indicator) * dloss
+         
 
     parallelize[_calc](B.to_int(),B.to_int())
             
@@ -637,8 +654,6 @@ struct ParameterTensors:
 
         var num_parameters: Int64 = 0
         
-       
-
         for i in range(NUM_PARAMETER_TENSORS):
             num_parameters += param_sizes[i].cast[DType.int64]()
 
@@ -1093,10 +1108,15 @@ fn gpt2_backward(inout model:GPT2):
     # backward pass
 
     # we kick off the chain by filling in dlosses with 1.0/(B*T), to get the mean loss
-    var dloss_mean:FLOAT = 1.0 / (B*T).to_int()
+    var dloss_mean:Float32 = 1.0 / (B*T).to_int()
     
-    for i in range(B*T):
-        model.grads_acts.losses[i] = dloss_mean 
+    #for i in range(B*T):
+    #    model.grads_acts.losses[i] = dloss_mean 
+   
+    @parameter 
+    fn _op[width:Int](iv:Int):
+        model.grads_acts.losses.store[width=width](iv,dloss_mean)
+    vectorize[_op,SIMD_WIDTH]((B*T).to_int())
 
     crossentropy_softmax_backward(model.grads_acts.logits, model.grads_acts.losses, model.acts.probs, model.targets, B, T, V)
     matmul_backward(model.grads_acts.lnf, model.grads.wte, NULL, model.grads_acts.logits, model.acts.lnf, model.params.wte, B, T, C, V)
@@ -1212,25 +1232,7 @@ fn gpt2_update(inout model:GPT2, learning_rate:FLOAT, beta1:FLOAT, beta2:FLOAT, 
         
         vectorize[_op, SIMD_WIDTH](num_vectorize.to_int())
 
-    parallelize[_calc](num_parallelize,num_parallelize)
-
-    #for i in range(model.num_parameters):
-    #    var param:FLOAT = model.params_memory[i]
-    #    var grad:FLOAT = model.grads_memory[i]
-    #
-    #    # update the first moment (momentum)
-    #    var m:FLOAT = beta1 * model.m_memory[i] + (1.0 - beta1) * grad
-    #    # update the second moment (RMSprop)
-    #    var v:FLOAT = beta2 * model.v_memory[i] + (1.0 - beta2) * grad * grad
-    #    # bias-correct both moments
-    #    var m_hat:FLOAT = m / (1.0 - pow(beta1, t))
-    #    var v_hat:FLOAT = v / (1.0 - pow(beta2, t))
-
-        # update
-    #     model.m_memory[i] = m
-    #    model.v_memory[i] = v
-    #    model.params_memory[i] -= learning_rate * (m_hat / (sqrt(v_hat) + eps) + weight_decay * param)
-    
+    parallelize[_calc](num_parallelize,num_parallelize) 
 
 fn gpt2_free(inout model:GPT2):
     model.params_memory.free()
