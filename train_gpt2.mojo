@@ -104,9 +104,7 @@ fn layernorm_forward( out:DTypePointer[dtype],  mean:DTypePointer[dtype], rstd:D
             var x:DTypePointer[dtype] = inp + b * T * C + t * C
             # calculate the mean
             var m:FLOAT = 0.0
-            #for i in range(C):
-            #    m += x[i]
-
+          
             @parameter
             fn _op[width: Int](iv: Int):
                 m += x.load[width=width](iv).reduce_add[1]()
@@ -116,10 +114,6 @@ fn layernorm_forward( out:DTypePointer[dtype],  mean:DTypePointer[dtype], rstd:D
 
             # calculate the variance (without any bias correction)
             var v:FLOAT = 0.0
-
-            #for i in range(C):
-            #    var xshift:FLOAT = x[i] - m
-            #    v += xshift * xshift
 
             @parameter
             fn _op2[width: Int](iv: Int):
@@ -162,13 +156,7 @@ fn layernorm_backward( dinp:DTypePointer[dtype], dweight:DTypePointer[dtype], db
             # first: two reduce operations
             var dnorm_mean:FLOAT = 0.0
             var dnorm_norm_mean:FLOAT = 0.0
-
-            #for i in range(C):
-            #    var norm_bti:FLOAT = (inp_bt[i] - mean_bt) * rstd_bt
-            #    var dnorm_i:FLOAT = weight[i] * dout_bt[i]
-            #    dnorm_mean += dnorm_i
-            #    dnorm_norm_mean += dnorm_i * norm_bti
-                
+       
             @parameter
             fn _op[width: Int](iv: Int):
                 var norm_bti = (inp_bt.load[width=width](iv) - mean_bt) * rstd_bt
@@ -332,11 +320,6 @@ fn attention_forward( out:DTypePointer[dtype], preatt:DTypePointer[dtype], att:D
                 # pass 2: calculate the exp and keep track of sum
                 var expsum:FLOAT = 0.0
 
-                #for t2 in range(t+1):
-                #    var expv:FLOAT = exp(preatt_bth[t2] - maxval)
-                #    expsum += expv
-                #    att_bth[t2] = expv
-
                 @parameter
                 fn _op2[width: Int](iv: Int):
                     var expv = exp(preatt_bth.load[width=width](iv) - maxval)
@@ -472,13 +455,6 @@ fn gelu_forward( out:DTypePointer[dtype], inp:DTypePointer[dtype],N:Int32):
 
     parallelize[_calc](NUM_PARALLELIZE,NUM_PARALLELIZE)
 
-    #@parameter
-    #fn _op[width: Int](iv: Int):
-    #    var x = inp.load[width=width](iv)
-    #    var cube = 0.044715 * pow(x,3) 
-    #    out.store[width=width](iv,0.5 * x * (1.0 + tanh(s * (x + cube))))
-    #   
-    #vectorize[_op, SIMD_WIDTH](size=N.to_int())
    
 fn gelu_backward( dinp:DTypePointer[dtype], inp:DTypePointer[dtype], dout:DTypePointer[dtype],N:Int32):
     var s:FLOAT = sqrt(2.0 / M_PI)
@@ -501,20 +477,7 @@ fn gelu_backward( dinp:DTypePointer[dtype], inp:DTypePointer[dtype], dout:DTypeP
         
         vectorize[_op, SIMD_WIDTH](num_vectorize.to_int())
     parallelize[_calc](NUM_PARALLELIZE,NUM_PARALLELIZE)
-    #
-    #@parameter
-    #fn _op[width: Int](iv: Int):
-    #    var x = inp.load[width=width](iv)
-    #    var cube = 0.044715 * pow(x,3)
-    #    var tanh_arg = s * (x + cube)
-    #    var tanh_out = tanh(tanh_arg)
-    #    var coshf_out = cosh(tanh_arg)
-    #    var sech_out = 1.0 / (coshf_out * coshf_out)
-    #    var local_grad = 0.5 * (1.0 + tanh_out) + x * 0.5 * sech_out * s * (1.0 + 3.0 * 0.044715 * x * x)
-    #    dinp.store[width=width](iv,dinp.load[width=width](iv) + local_grad * dout.load[width=width](iv))
-    #
-    #vectorize[_op, SIMD_WIDTH](size=N.to_int())
-
+   
 fn residual_forward( out:DTypePointer[dtype], inp1:DTypePointer[dtype], inp2:DTypePointer[dtype],N:Int32):
     var num_vectorize = N / NUM_PARALLELIZE
 
@@ -526,11 +489,6 @@ fn residual_forward( out:DTypePointer[dtype], inp1:DTypePointer[dtype], inp2:DTy
             out.store[width=width](iv,inp1.load[width=width](iv) + inp2.load[width=width](iv)) # scale and shift it        
         vectorize[_op, SIMD_WIDTH](num_vectorize.to_int())
     parallelize[_calc](NUM_PARALLELIZE,NUM_PARALLELIZE)
-
-    #@parameter
-    #fn _op[width: Int](iv: Int):
-    #    out.store[width=width](iv,inp1.load[width=width](iv) + inp2.load[width=width](iv)) # scale and shift it        
-    #vectorize[_op, SIMD_WIDTH](size=N.to_int())
 
 fn residual_backward( dinp1:DTypePointer[dtype], dinp2:DTypePointer[dtype], dout:DTypePointer[dtype],N:Int32):
     
@@ -547,12 +505,6 @@ fn residual_backward( dinp1:DTypePointer[dtype], dinp2:DTypePointer[dtype], dout
   
         vectorize[_op, SIMD_WIDTH](num_vectorize.to_int())
     parallelize[_calc](NUM_PARALLELIZE,NUM_PARALLELIZE)
-
-    #@parameter
-    #fn _op[width: Int](iv: Int):
-    #    dinp1.store[width=width](iv,dinp1.load[width=width](iv) + dout.load[width=width](iv)) # scale and shift it        
-    #    dinp2.store[width=width](iv,dinp2.load[width=width](iv) + dout.load[width=width](iv)) # scale and shift it        
-    #vectorize[_op, SIMD_WIDTH](size=N.to_int())
 
 
 fn softmax_forward( probs:DTypePointer[dtype], logits:DTypePointer[dtype],B:Int32,T:Int32,V:Int32):
@@ -1448,6 +1400,8 @@ struct Tokenizer:
             var str: String = file.read(length.to_int())
             if length>0 and len(str)>0:
                 self.token_table.append(str)
+            else:
+                self.token_table.append("")
 
         file.close()
         self.init_ok = 1
@@ -1457,10 +1411,9 @@ struct Tokenizer:
         if (self.init_ok == 0):
             return ""
 
-        if (token_id < len(self.token_table) and token_id >= 0):
+        if (token_id >= 0 and token_id < self.vocab_size) :
             return self.token_table[token_id]
         else:
-            #print("invalid token id", token_id)
             return ""
 
     fn safe_printf(self,str:String):
@@ -1533,7 +1486,7 @@ fn main() raises:
     for step in range(41):
        
         # once in a while estimate the validation loss
-        if step % 10 == 10:
+        if step % 10 == 0:
             var val_loss:FLOAT = 0.0
             dataloader_reset(val_loader)
             for i in range(val_num_batches):
