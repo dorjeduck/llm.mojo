@@ -14,16 +14,9 @@ Visit [llm.c](https://github.com/karpathy/llm.c) for a detailed explanation of t
 To use llm.mojo, follow the essential steps below:
 
 ```bash
-# Step 1: Install Python requirements
 pip install -r requirements.txt
-
-# Step 2: Download and Tokenize the TinyShakespeare Dataset
 python prepro_tinyshakespeare.py  
-
-# Step 3: Download the Weights
 python train_gpt2.py
-
-# Step 4: Train the Model
 mojo train_gpt2.mojo
 ```
 
