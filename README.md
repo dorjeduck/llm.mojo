@@ -26,7 +26,8 @@ For a more detailed step-by-step guide including additional setup details and op
 
 Preliminary benchmark results: (M2 MacBook Pro)
 
-* Running the OpenMP-enabled train_gpt2.c with 64 threads.
+* We are running the OpenMP-enabled train_gpt2.c with 64 threads.
+  (`OMP_NUM_THREADS=64 ./train_gpt2`)
 
 
 | Implementation             | Average Training Loop Time |
