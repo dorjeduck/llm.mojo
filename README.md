@@ -59,7 +59,7 @@ Preliminary benchmark results: (M2 MacBook Pro)
 
 | Implementation             | Average Training Loop Time |
 |----------------------------|----------------------------|
-| train_gpt2.mojo             | 1878 ms                    |
+| train_gpt2.mojo             | 1819 ms                    |
 | train_gpt2.c (with OpenMP)  | 2119 ms                    |
 | train_gpt2.c  (no OpenMP)   | 7473 ms                    |
 | train_gpt2_basic.mojo       | 54509 ms                   |
@@ -78,6 +78,8 @@ We ported `test_gpt2.c` from the original repository to Mojo to validate our por
   
 ## Changelog
 
+- 2024.04.19
+  - Further optimization (utilizing unroll_factor of vectorize)
 - 2024.04.19
   - test_gpt2.mojo added.
 - 2024.04.18

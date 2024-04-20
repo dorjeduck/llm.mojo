@@ -34,6 +34,7 @@ alias SIZEOF_INT = sizeof[DType.int32]()
 alias SIZEOF_FLOAT = sizeof[DType.float32]()
 
 alias NUM_PARALLELIZE = 8
+alias UNROLL_FACTOR = 4
 
 
 ## ----------------------------------------------------------------------------
@@ -57,7 +58,7 @@ fn encoder_forward(out:DTypePointer[dtype], inp:DTypePointer[dtype_int], wte:DTy
             @parameter
             fn _op[width: Int](iv: Int):
                 out_bt.store[width=width](iv,wte_ix.load[width=width](iv)+ wpe_t.load[width=width](iv))
-            vectorize[_op, SIMD_WIDTH](size=C)
+            vectorize[_op, SIMD_WIDTH,unroll_factor=UNROLL_FACTOR](size=C)
     parallelize[_calc](B, B)  
              
 fn encoder_backward(dwte:DTypePointer[dtype], dwpe:DTypePointer[dtype],dout:DTypePointer[dtype], inp:DTypePointer[dtype_int],B:Int,T:Int,C:Int):
@@ -74,7 +75,7 @@ fn encoder_backward(dwte:DTypePointer[dtype], dwpe:DTypePointer[dtype],dout:DTyp
                 var d = dout_bt.load[width=width](iv)
                 dwte_ix.store[width=width](iv,dwte_ix.load[width=width](iv)+ d)
                 dwpe_t.store[width=width](iv,dwpe_t.load[width=width](iv)+ d)
-            vectorize[_op, SIMD_WIDTH](size=C)
+            vectorize[_op, SIMD_WIDTH,unroll_factor=UNROLL_FACTOR](size=C)
     parallelize[_calc](B,B)  
             
     
@@ -92,7 +93,10 @@ fn layernorm_forward( out:DTypePointer[dtype],  mean:DTypePointer[dtype], rstd:D
             @parameter
             fn _op[width: Int](iv: Int):
                 m += x.load[width=width](iv).reduce_add[1]()
-            vectorize[_op, SIMD_WIDTH](size=C)
+            vectorize[_op, SIMD_WIDTH,unroll_factor=UNROLL_FACTOR](size=C)
+
+            #for i in range(C):
+            #    m += x[i]
  
             m = m/C
 
@@ -103,7 +107,11 @@ fn layernorm_forward( out:DTypePointer[dtype],  mean:DTypePointer[dtype], rstd:D
             fn _op2[width: Int](iv: Int):
                 var xshift = x.load[width=width](iv) - m
                 v += pow(xshift,2).reduce_add[1]()
-            vectorize[_op2, SIMD_WIDTH](size=C)
+            vectorize[_op2, SIMD_WIDTH,unroll_factor=UNROLL_FACTOR](size=C)
+
+            #for i in range(C):
+            #    var xshift:FLOAT = x[i] - m
+            #    v += xshift * xshift
 
             v = v/C
            
@@ -117,7 +125,7 @@ fn layernorm_forward( out:DTypePointer[dtype],  mean:DTypePointer[dtype], rstd:D
             fn _op3[width: Int](iv: Int):
                 var n = s * (x.load[width=width](iv) - m) # normalized output        
                 out_bt.store[width=width](iv, n * weight.load[width=width](iv) + bias.load[width=width](iv)) # scale and shift it        
-            vectorize[_op3, SIMD_WIDTH](size=C)
+            vectorize[_op3, SIMD_WIDTH,unroll_factor=UNROLL_FACTOR](size=C)
            
             # cache the mean and rstd for the backward pass later
             mean[b * T + t] = m
@@ -147,7 +155,14 @@ fn layernorm_backward( dinp:DTypePointer[dtype], dweight:DTypePointer[dtype], db
                 var dnorm_i = weight.load[width=width](iv) * dout_bt.load[width=width](iv)
                 dnorm_mean += dnorm_i.reduce_add[1]()
                 dnorm_norm_mean += (dnorm_i * norm_bti).reduce_add[1]()    
-            vectorize[_op, SIMD_WIDTH](size=C)
+            vectorize[_op, SIMD_WIDTH,unroll_factor=UNROLL_FACTOR](size=C)
+
+            #for i in range(C):
+            #    var norm_bti:FLOAT = (inp_bt[i] - mean_bt) * rstd_bt
+            #    var dnorm_i:FLOAT = weight[i] * dout_bt[i]
+            #    dnorm_mean += dnorm_i
+            #    dnorm_norm_mean += dnorm_i * norm_bti
+
           
             dnorm_mean = dnorm_mean / C
             dnorm_norm_mean = dnorm_norm_mean / C
@@ -173,7 +188,7 @@ fn layernorm_backward( dinp:DTypePointer[dtype], dweight:DTypePointer[dtype], db
                     * rstd_bt
                 )
 
-            vectorize[_op2, SIMD_WIDTH](size=C)
+            vectorize[_op2, SIMD_WIDTH,unroll_factor=UNROLL_FACTOR](size=C)
 
     parallelize[_calc](B,B)  
             
@@ -199,14 +214,15 @@ fn matmul_forward( out:DTypePointer[dtype],
                     val = bias[o]
                 var wrow:DTypePointer[dtype] = weight + o*C
 
-                #for i in range(C):
-                #    val += inp_bt[i] * wrow[i]
-
+                
                 @parameter
                 fn _op[width: Int](iv: Int):
                     var t = inp_bt.load[width=width](iv) * wrow.load[width=width](iv) 
                     val += t.reduce_add[1]()
-                vectorize[_op, SIMD_WIDTH](size=C)
+                vectorize[_op, SIMD_WIDTH,unroll_factor=UNROLL_FACTOR](size=C)
+
+                #for i in range(C):
+                #    val += inp_bt[i] * wrow[i]
 
                 out_bt[o] = val
     parallelize[_calc](B,B)  
@@ -233,7 +249,7 @@ fn matmul_backward( dinp:DTypePointer[dtype], dweight:DTypePointer[dtype], dbias
                 @parameter
                 fn _op[width: Int](iv: Int):
                     dinp_bt.store[width=width](iv,dinp_bt.load[width=width](iv) + wrow.load[width=width](iv)*d) # scale and shift it        
-                vectorize[_op, SIMD_WIDTH](size=C)
+                vectorize[_op, SIMD_WIDTH,unroll_factor=UNROLL_FACTOR](size=C)
             
     parallelize[_calc](B,B) 
     # backward into weight/bias, parallelize over output channels OC
@@ -253,7 +269,7 @@ fn matmul_backward( dinp:DTypePointer[dtype], dweight:DTypePointer[dtype], dbias
                 @parameter
                 fn _op[width: Int](iv: Int):
                     dwrow.store[width=width](iv,dwrow.load[width=width](iv) + inp_bt.load[width=width](iv)*d) # scale and shift it        
-                vectorize[_op, SIMD_WIDTH](size=C)
+                vectorize[_op, SIMD_WIDTH,unroll_factor=UNROLL_FACTOR](size=C)
 
     parallelize[_calc2](OC, OC)       
                 
@@ -293,7 +309,10 @@ fn attention_forward( out:DTypePointer[dtype], preatt:DTypePointer[dtype], att:D
                     fn _op[width: Int](iv: Int):
                         var t = query_t.load[width=width](iv) * key_t2.load[width=width](iv) 
                         val += t.reduce_add[1]()
-                    vectorize[_op, SIMD_WIDTH](size=hs)
+                    vectorize[_op, SIMD_WIDTH,unroll_factor=UNROLL_FACTOR](size=hs)
+
+                    #for i in range(hs):
+                    #    val += query_t[i] * key_t2[i]
 
                     val *= scale
                     if (val > maxval):
@@ -309,7 +328,13 @@ fn attention_forward( out:DTypePointer[dtype], preatt:DTypePointer[dtype], att:D
                     var expv = exp(preatt_bth.load[width=width](iv) - maxval)
                     expsum += expv.reduce_add[1]()
                     att_bth.store[width=width](iv,expv)
-                vectorize[_op2, SIMD_WIDTH](size=t+1)
+                vectorize[_op2, SIMD_WIDTH,unroll_factor=UNROLL_FACTOR](size=t+1)
+
+
+                #for t2 in range(t+1):
+                #    var expv:FLOAT = exp(preatt_bth[t2] - maxval)
+                #    expsum += expv
+                #    att_bth[t2] = expv
                 
                 var expsum_inv:FLOAT = 0.0
                 if expsum != 0.0:
@@ -320,7 +345,7 @@ fn attention_forward( out:DTypePointer[dtype], preatt:DTypePointer[dtype], att:D
                 @parameter
                 fn _op3[width:Int](t2:Int):
                     att_bth.store[width=width](t2, att_bth.load[width=width](t2)*expsum_inv)
-                vectorize[_op3,SIMD_WIDTH](size=t+1)
+                vectorize[_op3,SIMD_WIDTH,unroll_factor=UNROLL_FACTOR](size=t+1)
                 memset_zero(att_bth+t+1,T-t-1)
                 
 
@@ -350,7 +375,7 @@ fn attention_forward( out:DTypePointer[dtype], preatt:DTypePointer[dtype], att:D
                             + att_btht2 * value_t2.load[width=width](iv)
                         )
                     
-                    vectorize[_op4, SIMD_WIDTH](size=hs)
+                    vectorize[_op4, SIMD_WIDTH,unroll_factor=UNROLL_FACTOR](size=hs)
                    
     parallelize[_calc](B,B)                   
                    
@@ -395,7 +420,14 @@ fn attention_backward( dinp:DTypePointer[dtype], dpreatt:DTypePointer[dtype], da
                         # so now we have:
                         datt_bth[t2] += (value_t2.load[width=width](iv)  * dout_bth.load[width=width](iv)).reduce_add[1]() 
                         dvalue_t2.store[width=width](iv,dvalue_t2.load[width=width](iv)  + att_bth[t2] * dout_bth.load[width=width](iv)) 
-                    vectorize[_op, SIMD_WIDTH](size=hs)
+                    vectorize[_op, SIMD_WIDTH,unroll_factor=UNROLL_FACTOR](size=hs)
+
+                    #for i in range(hs):
+                    #    # in the forward pass this was:
+                    #    # out_bth[i] += att_bth[t2] * value_t2[i]
+                    #    # so now we have:
+                    #    datt_bth[t2] += value_t2[i] * dout_bth[i]
+                    #    dvalue_t2[i] += att_bth[t2] * dout_bth[i]
                      
                 # backward pass 2 & 3, the softmax
                 # note that softmax (like e.g. tanh) doesn't need the input (preatt) to backward
@@ -404,7 +436,7 @@ fn attention_backward( dinp:DTypePointer[dtype], dpreatt:DTypePointer[dtype], da
                     fn _op3[width:Int](t3:Int):
                         var local_derivative = - att_bth[t2] * att_bth.load[width=width](t3)
                         dpreatt_bth.store[width=width](t3,dpreatt_bth.load[width=width](t3) + local_derivative * datt_bth[t2])
-                    vectorize[_op3,SIMD_WIDTH](size=t+1)
+                    vectorize[_op3,SIMD_WIDTH,unroll_factor=UNROLL_FACTOR](size=t+1)
                     dpreatt_bth[t2] += att_bth[t2] * datt_bth[t2] 
 
                     #for t3 in range(t+1):
@@ -429,7 +461,7 @@ fn attention_backward( dinp:DTypePointer[dtype], dpreatt:DTypePointer[dtype], da
                         dquery_t.store[width=width](iv,dquery_t.load[width=width](iv) + key_t2.load[width=width](iv) * dpreatt_bth[t2] * scale)
                         dkey_t2.store[width=width](iv,dkey_t2.load[width=width](iv) + query_t.load[width=width](iv) * dpreatt_bth[t2] * scale)
                      
-                    vectorize[_op2, SIMD_WIDTH](size=hs)
+                    vectorize[_op2, SIMD_WIDTH,unroll_factor=UNROLL_FACTOR](size=hs)
     
     parallelize[_calc](B,B)
                     
@@ -449,7 +481,7 @@ fn gelu_forward( out:DTypePointer[dtype], inp:DTypePointer[dtype],N:Int):
             var cube = 0.044715 * pow(x,3) 
             out.store[width=width](iv,0.5 * x * (1.0 + tanh(s * (x + cube))))
                     
-        vectorize[_op, SIMD_WIDTH](num_vectorize)
+        vectorize[_op, SIMD_WIDTH,unroll_factor=UNROLL_FACTOR](num_vectorize)
     parallelize[_calc](NUM_PARALLELIZE,NUM_PARALLELIZE)
 
 
@@ -472,7 +504,7 @@ fn gelu_backward( dinp:DTypePointer[dtype], inp:DTypePointer[dtype], dout:DTypeP
             var local_grad = 0.5 * (1.0 + tanh_out) + x * 0.5 * sech_out * s * (1.0 + 3.0 * 0.044715 * x * x)
             dinp.store[width=width](iv,dinp.load[width=width](iv) + local_grad * dout.load[width=width](iv))
         
-        vectorize[_op, SIMD_WIDTH](num_vectorize)
+        vectorize[_op, SIMD_WIDTH,unroll_factor=UNROLL_FACTOR](num_vectorize)
     parallelize[_calc](NUM_PARALLELIZE,NUM_PARALLELIZE)
    
 fn residual_forward( out:DTypePointer[dtype], inp1:DTypePointer[dtype], inp2:DTypePointer[dtype],N:Int):
@@ -484,7 +516,7 @@ fn residual_forward( out:DTypePointer[dtype], inp1:DTypePointer[dtype], inp2:DTy
         fn _op[width: Int](_iv: Int):
             var iv = ip*num_vectorize + _iv
             out.store[width=width](iv,inp1.load[width=width](iv) + inp2.load[width=width](iv)) # scale and shift it        
-        vectorize[_op, SIMD_WIDTH](num_vectorize)
+        vectorize[_op, SIMD_WIDTH,unroll_factor=UNROLL_FACTOR](num_vectorize)
     parallelize[_calc](NUM_PARALLELIZE,NUM_PARALLELIZE)
 
 fn residual_backward( dinp1:DTypePointer[dtype], dinp2:DTypePointer[dtype], dout:DTypePointer[dtype],N:Int):
@@ -500,7 +532,7 @@ fn residual_backward( dinp1:DTypePointer[dtype], dinp2:DTypePointer[dtype], dout
             dinp1.store[width=width](iv,dinp1.load[width=width](iv) + dout.load[width=width](iv)) # scale and shift it        
             dinp2.store[width=width](iv,dinp2.load[width=width](iv) + dout.load[width=width](iv)) # scale and shift it        
   
-        vectorize[_op, SIMD_WIDTH](num_vectorize)
+        vectorize[_op, SIMD_WIDTH,unroll_factor=UNROLL_FACTOR](num_vectorize)
     parallelize[_calc](NUM_PARALLELIZE,NUM_PARALLELIZE)
 
 
@@ -532,12 +564,16 @@ fn softmax_forward( probs:DTypePointer[dtype], logits:DTypePointer[dtype],B:Int,
             fn _op[width: Int](iv: Int):
                 probs_bt.store[width=width](iv,exp(logits_bt.load[width=width](iv)-maxval))
                 sum += probs_bt.load[width=width](iv).reduce_add[1]()
-            vectorize[_op, SIMD_WIDTH](size=V)
+            vectorize[_op, SIMD_WIDTH,unroll_factor=UNROLL_FACTOR](size=V)
+
+            #for i in range(V):
+            #    probs_bt[i] = exp(logits_bt[i] - maxval)
+            #    sum += probs_bt[i]
 
             @parameter
             fn _op2[width: Int](iv: Int):
                 probs_bt.store[width=width](iv,probs_bt.load[width=width](iv)/sum) # scale and shift it        
-            vectorize[_op2, SIMD_WIDTH](size=V)
+            vectorize[_op2, SIMD_WIDTH,unroll_factor=UNROLL_FACTOR](size=V)
     
     parallelize[_calc](B,B)
 
@@ -576,7 +612,7 @@ fn crossentropy_softmax_backward( dlogits:DTypePointer[dtype],
             @parameter
             fn _op[width:Int](iv:Int):
                 dlogits_bt.store[width=width](iv,dlogits_bt.load[width=width](iv) + probs_bt.load[width=width](iv) * dloss)
-            vectorize[_op,SIMD_WIDTH](size=V)
+            vectorize[_op,SIMD_WIDTH,unroll_factor=UNROLL_FACTOR](size=V)
             
             if ix >= 0 and ix < V:
                 dlogits_bt[ix] -=  dloss
@@ -1105,7 +1141,7 @@ fn gpt2_backward(inout model:GPT2):
     @parameter 
     fn _op[width:Int](iv:Int):
         model.grads_acts.losses.store[width=width](iv,dloss_mean)
-    vectorize[_op,SIMD_WIDTH]((B*T))
+    vectorize[_op,SIMD_WIDTH,unroll_factor=UNROLL_FACTOR]((B*T))
 
     crossentropy_softmax_backward(model.grads_acts.logits, model.grads_acts.losses, model.acts.probs, model.targets, B, T, V)
     matmul_backward(model.grads_acts.lnf, model.grads.wte, NULL, model.grads_acts.logits, model.acts.lnf, model.params.wte, B, T, C, V)
@@ -1218,7 +1254,7 @@ fn gpt2_update(inout model:GPT2, learning_rate:FLOAT, beta1:FLOAT, beta2:FLOAT, 
             model.v_memory.store[width=width](iv,v)
             model.params_memory.store[width=width](iv,model.params_memory.load[width=width](iv) - learning_rate * (m_hat / (sqrt(v_hat) + eps) + weight_decay * param))
         
-        vectorize[_op, SIMD_WIDTH](num_vectorize)
+        vectorize[_op, SIMD_WIDTH,unroll_factor=UNROLL_FACTOR](num_vectorize)
 
     parallelize[_calc](NUM_PARALLELIZE,NUM_PARALLELIZE) 
 
@@ -1459,7 +1495,7 @@ fn main() raises:
     var val_loader = DataLoader() 
     dataloader_init(val_loader, val_tokens, B, T)
     print("val dataset num_batches:", val_loader.num_batches)
-    var val_num_batches:Int = 5
+    var val_num_batches:Int = 10
 
     # build the Tokenizer
     var tokenizer = Tokenizer("gpt2_tokenizer.bin")
