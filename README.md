@@ -7,51 +7,27 @@ This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/
 - **train_gpt_basic.mojo**: Basic port of train_gpt.c to Mojo, which does not leverage Mojo's capabilities. Beyond the initial commit, we will not provide further updates for the 'train_gpt2_basic' version, except for necessary bug fixes.
 - **train_gpt.mojo**: Enhanced version utilizing Mojo's performance gems like vectorization and parallelization. Work in progress.
 
-## How to Use
+## How to use
 
-Visit [llm.c](https://github.com/karpathy/llm.c) for a detailed explanation of the original project. To use `llm.mojo`, follow the essential steps below:
+Visit [llm.c](https://github.com/karpathy/llm.c) for a detailed explanation of the original project.
 
-### Step 1: Install python requirements
-
-Before running the following Python scripts, run this command to install the necessary Python packages:
+To use llm.mojo, follow the essential steps below:
 
 ```bash
+# Step 1: Install Python requirements
 pip install -r requirements.txt
-```
 
-### Step 2: Download and Tokenize a Dataset
+# Step 2: Download and Tokenize the TinyShakespeare Dataset
+python prepro_tinyshakespeare.py  
 
-Use the [tinyshakespeare](https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt) dataset for a quick setup. This dataset is the fastest to download and tokenize. Run the following command to download and prepare the dataset:
-
-```bash
-python prepro_tinyshakespeare.py
-```
-
-(all Python scripts in this repo are from Andrej Karpathy's [llm.c](https://github.com/karpathy/llm.c) repository.)
-
-Alternatively, download and tokenize the larger [TinyStories](https://huggingface.co/datasets/roneneldan/TinyStories) dataset with the following command:
-
-```bash
-python prepro_tinystory.py
-```
-
-### Step 3: Download the weights
-
-Next download the GPT-2 weights and save them as a checkpoint we can load in Mojo with following command:
-
-```bash
+# Step 3: Download the Weights
 python train_gpt2.py
+
+# Step 4: Train the Model
+mojo train_gpt.mojo
 ```
 
-### Step 4: Train the Model
-
-Ensure Mojo is installed by following the [Get started with Mojo 🔥](https://docs.modular.com/mojo/manual/get-started/) guide. Train your model by running:
-
- ```bash
- mojo train_gpt.mojo
- ```
-
-This command starts the training process using the prepared data.
+For step-by-step instructions including additional setup details and options, please refer to our [detailed usage guide](./usage_instructions.md).
 
 ## Benchmarks
 
