@@ -1,6 +1,6 @@
 # llm.🔥
 
-This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/llm.c) to [Mojo](https://docs.modular.com/mojo), currently in beta. It is under active development and subject to significant changes. Users should expect to encounter bugs and unfinished features.
+This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/llm.c) to [Mojo](https://docs.modular.com/mojo), currently in beta. It is under active development and subject to changes. Users should expect to encounter bugs and unfinished features.
 
 ## Implementation
 
@@ -13,7 +13,7 @@ Visit [llm.c](https://github.com/karpathy/llm.c) for a detailed explanation of t
 
 ### Step 1: Install python requirements
 
-Before running the following python scripts, ensure that PyTorch is installed on your system. Additionally, install all other required Python packages with the following command:
+Before running the following Python scripts, run this command to install the necessary Python packages:
 
 ```bash
 pip install -r requirements.txt
@@ -68,7 +68,7 @@ Preliminary benchmark results: (M2 MacBook Pro)
 
 ## Test
 
-We ported `test_gpt2.c` from the original repository to Mojo to validate our port's functionality. For instructions on how to run this test and insights into the results it yields, please see our detailed guide [here](./test.md).
+We ported `test_gpt2.c` from the original repository to Mojo to validate our port's functionality. For instructions on how to run this test and insights into the results it yields, please see our guide [here](./test.md).
 
 ## Development Roadmap
 
