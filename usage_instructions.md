@@ -37,7 +37,7 @@ python train_gpt2.py
 Ensure Mojo is installed by following the [Get started with Mojo 🔥](https://docs.modular.com/mojo/manual/get-started/) guide. Train your model by running:
 
  ```bash
- mojo train_gpt.mojo
+ mojo train_gpt2.mojo
  ```
 
 This command starts the training process using the prepared data.
