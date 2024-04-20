@@ -8,7 +8,7 @@ mojo test_gpt2.mojo
 
 This script is a Mojo port of the original `test_gpt2.c`, created by Andrej. and replicates the testing functionality from the C version.
 
-### etails
+### Details
 
 The testing process involves loading the `gpt2_124M_debug_state.bin` file and running a forward pass to compare the computed logits and loss with the reference values obtained from the PyTorch implementation. Additionally, the test performs 10 iterations of training using the Adam optimizer to verify that the losses match those computed by PyTorch.
 
