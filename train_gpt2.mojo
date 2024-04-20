@@ -1459,7 +1459,7 @@ fn main() raises:
     var val_loader = DataLoader() 
     dataloader_init(val_loader, val_tokens, B, T)
     print("val dataset num_batches:", val_loader.num_batches)
-    var val_num_batches:Int = 10
+    var val_num_batches:Int = 5
 
     # build the Tokenizer
     var tokenizer = Tokenizer("gpt2_tokenizer.bin")
