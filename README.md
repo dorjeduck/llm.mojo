@@ -24,7 +24,7 @@ python prepro_tinyshakespeare.py
 python train_gpt2.py
 
 # Step 4: Train the Model
-mojo train_gpt.mojo
+mojo train_gpt2.mojo
 ```
 
 For step-by-step instructions including additional setup details and options, please refer to our [detailed usage guide](./usage_instructions.md).
