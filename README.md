@@ -26,10 +26,13 @@ For a more detailed step-by-step guide including additional setup details and op
 
 Preliminary benchmark results: (M2 MacBook Pro)
 
+* Running the OpenMP-enabled train_gpt2.c with 64 threads.
+
+
 | Implementation             | Average Training Loop Time |
 |----------------------------|----------------------------|
 | train_gpt2.mojo             | 1819 ms                    |
-| train_gpt2.c (with OpenMP)  | 2119 ms                    |
+| train_gpt2.c (with OpenMP)  | 1849 ms                    |
 | train_gpt2.c  (no OpenMP)   | 7473 ms                    |
 | train_gpt2_basic.mojo       | 54509 ms                   |
 
