@@ -6,7 +6,7 @@ To perform tests on the ported Mojo code, execute the following command:
 mojo test_gpt2.mojo
 ```
 
-This script is a Mojo adaptation of the original `test_gpt2.c`, created by Andrej. and replicates the testing functionality from the C version.
+This script is a Mojo port of the original `test_gpt2.c`, created by Andrej. and replicates the testing functionality from the C version.
 
 ### etails
 
