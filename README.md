@@ -11,7 +11,7 @@ This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/
 
 Visit [llm.c](https://github.com/karpathy/llm.c) for a detailed explanation of the original project.
 
-To use llm.mojo, follow the essential steps below:
+To use llm.mojo, run:
 
 ```bash
 pip install -r requirements.txt
