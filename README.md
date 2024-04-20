@@ -27,7 +27,7 @@ python train_gpt2.py
 mojo train_gpt2.mojo
 ```
 
-For step-by-step instructions including additional setup details and options, please refer to our [detailed usage guide](./usage_instructions.md).
+For a more detailed step-by-step guide including additional setup details and options, please refer to our [detailed usage instructions](./usage_instructions.md).
 
 ## Benchmarks
 
