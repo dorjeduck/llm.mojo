@@ -68,14 +68,14 @@ fn layernorm_forward(inout out:DTypePointer[dtype], mean:DTypePointer[dtype], rs
             for i in range(C):
                 m += x[i]
             
-            m = m/C.to_int()
+            m = m/int(C)
             # calculate the variance (without any bias correction)
             var v:FLOAT = 0.0
             for i in range(C):
                 var xshift:FLOAT = x[i] - m
                 v += xshift * xshift
             
-            v = v/C.to_int()
+            v = v/int(C)
            
             # calculate the rstd
             var s:FLOAT = 1.0 / sqrt(v + eps)
@@ -111,8 +111,8 @@ fn layernorm_backward( dinp:DTypePointer[dtype], dweight:DTypePointer[dtype], db
                 dnorm_mean += dnorm_i
                 dnorm_norm_mean += dnorm_i * norm_bti
             
-            dnorm_mean = dnorm_mean / C.to_int()
-            dnorm_norm_mean = dnorm_norm_mean / C.to_int()
+            dnorm_mean = dnorm_mean / int(C)
+            dnorm_norm_mean = dnorm_norm_mean / int(C)
 
             # now iterate again and accumulate all the gradients
             for i in range(C):
@@ -444,7 +444,7 @@ struct ParameterTensors:
             num_parameters += param_sizes[i].cast[DType.int64]()
 
         # malloc all parameters all at once
-        self.params_memory = DTypePointer[dtype]().alloc(num_parameters.to_int())
+        self.params_memory = DTypePointer[dtype]().alloc(int(num_parameters))
         # assign all the tensors
 
         var ptrs = List(
@@ -564,7 +564,7 @@ struct ActivationTensors:
         for i in range(NUM_ACTIVATION_TENSORS):
             num_activations += act_sizes[i].cast[DType.int64]()
 
-        var acts_memory = DTypePointer[dtype]().alloc(num_activations.to_int())
+        var acts_memory = DTypePointer[dtype]().alloc(int(num_activations))
 
         var acts_memory_iterator: DTypePointer[dtype] = acts_memory
         for i in range(NUM_ACTIVATION_TENSORS):
@@ -692,12 +692,12 @@ struct GPT2:
         self.params = ParameterTensors()
         self.params_memory = self.params.alloc_and_point_parameters(self.param_sizes)
         
-        var data_raw = model_file.read( (num_parameters * SIZEOF_FLOAT).to_int())
+        var data_raw = model_file.read( int(num_parameters * SIZEOF_FLOAT))
         
         model_file.close()
 
         var float32_ptr= data_raw._steal_ptr().bitcast[DType.float32]()
-        memcpy(dest=self.params_memory,src=float32_ptr,count=(num_parameters).to_int())
+        memcpy(dest=self.params_memory,src=float32_ptr,count=int(num_parameters))
 
         # other inits
         self.acts = ActivationTensors()
@@ -772,22 +772,22 @@ fn gpt2_forward(inout model:GPT2, inputs:DTypePointer[dtype_int], targets:DTypeP
         model.num_activations = num_activations.cast[DType.int64]()
         # also create memory for caching inputs and targets
        
-        model.inputs = DTypePointer[dtype_int]().alloc((B * T).to_int() )
-        model.targets = DTypePointer[dtype_int]().alloc((B * T).to_int() )
+        model.inputs = DTypePointer[dtype_int]().alloc(int(B * T) )
+        model.targets = DTypePointer[dtype_int]().alloc(int(B * T) )
     
     else:
         # validate B,T is no larger than what was previously allocated
         # in principle, we could re-allocate a larger chunk of memory, for now we just error out
-        if B > model.batch_size.to_int() or T > model.seq_len.to_int():
+        if B > int(model.batch_size) or T > int(model.seq_len):
             print("Error: batch size or sequence length is inadequately large")
             #print("Model: B=%d T=%d, Desired: B=%d T=%d\n", model.batch_size, model.seq_len, B, T)
             
    
     # cache the inputs/targets
-    memcpy(model.inputs, inputs, (B * T).to_int())
+    memcpy(model.inputs, inputs, int(B * T))
 
     if targets != NULL_INT:
-        memcpy(model.targets, targets, (B * T).to_int())
+        memcpy(model.targets, targets, int(B * T))
     
     # forward pass
     
@@ -858,7 +858,7 @@ fn gpt2_forward(inout model:GPT2, inputs:DTypePointer[dtype_int], targets:DTypeP
         var mean_loss:FLOAT = 0.0
         for i in range(B*T):
              mean_loss += model.acts.losses[i] 
-        mean_loss /= (B*T).to_int()
+        mean_loss /= int(B * T)
         model.mean_loss = mean_loss
     else:
         # if we don't have targets, we don't have a loss
@@ -866,10 +866,10 @@ fn gpt2_forward(inout model:GPT2, inputs:DTypePointer[dtype_int], targets:DTypeP
     
 fn gpt2_zero_grad(inout model:GPT2):
     if(model.grads_memory != NULL): 
-        memset_zero(model.grads_memory, model.num_parameters.to_int()) 
+        memset_zero(model.grads_memory, int(model.num_parameters))
 
     if(model.grads_acts_memory != NULL): 
-        memset_zero(model.grads_acts_memory, model.num_activations.to_int()) 
+        memset_zero(model.grads_acts_memory, int(model.num_activations)) 
 
 fn gpt2_backward(inout model:GPT2):
 
@@ -894,7 +894,7 @@ fn gpt2_backward(inout model:GPT2):
     # backward pass
 
     # we kick off the chain by filling in dlosses with 1.0/(B*T), to get the mean loss
-    var dloss_mean:FLOAT = 1.0 / (B*T).to_int()
+    var dloss_mean:FLOAT = 1.0 / int(B * T)
     
     for i in range(B*T):
         model.grads_acts.losses[i] = dloss_mean 
@@ -980,11 +980,11 @@ fn gpt2_update(inout model:GPT2, learning_rate:FLOAT, beta1:FLOAT, beta2:FLOAT, 
 
     # lazily allocate the memory for m_memory and v_memory
     if (model.m_memory == NULL):
-        model.m_memory = DTypePointer[dtype]().alloc(model.num_parameters.to_int())
-        model.v_memory = DTypePointer[dtype]().alloc(model.num_parameters.to_int())
+        model.m_memory = DTypePointer[dtype]().alloc(int(model.num_parameters))
+        model.v_memory = DTypePointer[dtype]().alloc(int(model.num_parameters))
 
-        memset_zero(model.m_memory,model.num_parameters.to_int())
-        memset_zero(model.v_memory,model.num_parameters.to_int())
+        memset_zero(model.m_memory,int(model.num_parameters))
+        memset_zero(model.v_memory,int(model.num_parameters))
 
     for i in range(model.num_parameters):
         var param:FLOAT = model.params_memory[i]
@@ -1063,17 +1063,17 @@ fn dataloader_init(inout loader:DataLoader,filename:StringRef,B:Int32,T:Int32) r
     var _os = Python.import_module("os")  
     loader.file_size = int(_os.path.getsize(filename))
 
-    if (loader.file_size < (B * T + 1).to_int() * 4):
+    if (loader.file_size < int(B * T + 1) * 4):
         print("Error: file size is too small for the batch size and sequence length\n")
          
     loader.current_position = 0 # start at the beginning
 
     # allocate space for B*T + 1 integers to store the inputs and targets loader.batch = (int*) malloc((B * T + 1) * sizeof(int))
     
-    loader.batch = DTypePointer[dtype_int]().alloc((B * T + 1).to_int())
+    loader.batch = DTypePointer[dtype_int]().alloc(int(B * T + 1))
     loader.inputs = loader.batch
     loader.targets = loader.batch + 1 # targets are shifted by one
-    loader.num_batches = loader.file_size.to_int() / (B * T * SIZEOF_INT).to_int()
+    loader.num_batches = int(loader.file_size) / int(B * T * SIZEOF_INT)
 
 fn dataloader_reset(inout loader:DataLoader):
     loader.current_position = 0
@@ -1083,17 +1083,17 @@ fn dataloader_next_batch(inout loader:DataLoader) raises:
     var T:Int32 = loader.T
 
     # if we are at the end of the file, loop back to the beginning
-    if loader.current_position + ((B*T+1) * SIZEOF_INT).to_int() > loader.file_size:
+    if loader.current_position + int((B*T+1) * SIZEOF_INT) > loader.file_size:
         loader.current_position = 0
         
     # read the B*T+1 integers from the file into batch
-    _ = loader.tokens_file.seek( loader.current_position.to_int())
+    _ = loader.tokens_file.seek( int(loader.current_position))
     
     # config_data_raw id Tensor[DType.int8] with bytes_of_config_params elements
-    var data_raw = loader.tokens_file.read(((B*T+1) * SIZEOF_INT).to_int())
+    var data_raw = loader.tokens_file.read(int((B*T+1) * SIZEOF_INT))
     var int32_ptr= data_raw._steal_ptr().bitcast[DType.int32]()
 
-    memcpy(dest=loader.batch,src=int32_ptr,count=(B*T+1).to_int())
+    memcpy(dest=loader.batch,src=int32_ptr,count=int(B*T+1))
        
     # advance the current position by B*T integers
     loader.current_position += B*T * SIZEOF_INT
@@ -1164,11 +1164,11 @@ struct Tokenizer:
             print("Bad version in model file")
             # EXIT_1
 
-        self.vocab_size = header[2].to_int()
+        self.vocab_size = int(header[2])
 
         for i in range(self.vocab_size):
-            var length = file.read_bytes(1)[0]
-            var str: String = file.read(length.to_int())
+            var length = int(file.read_bytes(1)[0])
+            var str: String = file.read(length)
             if length>0 and len(str)>0:
                 self.token_table.append(str)
 
@@ -1241,7 +1241,7 @@ fn main() raises:
     # some memory for generating samples from the model
     var rng_state:UInt64 = 1337
     var gen_max_length:Int32 = 64
-    var gen_tokens = DTypePointer[dtype_int]().alloc(gen_max_length.to_int())
+    var gen_tokens = DTypePointer[dtype_int]().alloc(int(gen_max_length))
 
     # train
 
@@ -1258,7 +1258,7 @@ fn main() raises:
                 gpt2_forward(model, val_loader.inputs, val_loader.targets, B, T)
                 val_loss += model.mean_loss
             
-            val_loss /= val_num_batches.to_int()
+            val_loss /= int(val_num_batches)
             print("val loss", val_loss)
         
         # once in a while do model inference to prgenerated INT32 text
@@ -1274,7 +1274,7 @@ fn main() raises:
                 gpt2_forward(model, gen_tokens, NULL_INT, 1, t)
                 var probs = model.acts.probs + (t-1) * model.config.vocab_size
                 var coin:FLOAT = random_f32(rng_state)
-                var next_token:Int = sample_mult(probs, model.config.vocab_size, coin).to_int()
+                var next_token:Int = int(sample_mult(probs, model.config.vocab_size, coin))
                 gen_tokens[t] = next_token
             
                 # print the generated token, either using the Tokenizer or a fallback

@@ -93,10 +93,8 @@ fn main() raises:
         print("Bad version in model file")
         # EXIT_1
 
-    var B: Int = state_header[2].to_int()  # batch size, e.g. 4
-    var T: Int = state_header[
-        3
-    ].to_int()  # time / sequence length (e.g. 64, up to maxT)
+    var B: Int = int(state_header[2])  # batch size, e.g. 4
+    var T: Int = int(state_header[3])  # time / sequence length (e.g. 64, up to maxT)
 
     print("[State]")
     print("batch_size:", B)
