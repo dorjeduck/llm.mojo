@@ -793,7 +793,7 @@ struct ParameterTensors:
     var lnfb: DTypePointer[dtype]  # (C)
 
     fn __init__(
-        inout self,
+        inout self
     ):
         self.params_memory = DTypePointer[dtype]()
 
@@ -1023,11 +1023,11 @@ struct GPT2:
         # read in hyperparameters
 
         self.config = GPT2Config(
-            model_header[2].to_int(),
-            model_header[3].to_int(),
-            model_header[4].to_int(),
-            model_header[5].to_int(),
-            model_header[6].to_int(),
+            int(model_header[2]),
+            int(model_header[3]),
+            int(model_header[4]),
+            int(model_header[5]),
+            int(model_header[6]),
         )
 
         var maxT: Int = self.config.max_seq_len
@@ -1712,11 +1712,11 @@ struct Tokenizer:
             print("Bad version in model file")
             # EXIT_1
 
-        self.vocab_size = header[2].to_int()
+        self.vocab_size = int(header[2])
 
         for i in range(self.vocab_size):
-            var length = file.read_bytes(1)[0]
-            var str: String = file.read(length.to_int())
+            var length = int(file.read_bytes(1)[0])
+            var str: String = file.read(length)
             if length > 0 and len(str) > 0:
                 self.token_table.append(str)
             else:
