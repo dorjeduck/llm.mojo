@@ -4,8 +4,8 @@ This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/
 
 ## Implementation
 
-- **train_gpt_basic.mojo**: Basic port of train_gpt.c to Mojo, which does not leverage Mojo's capabilities. Beyond the initial commit, we will not provide further updates for the 'train_gpt2_basic' version, except for necessary bug fixes.
-- **train_gpt.mojo**: Enhanced version utilizing Mojo's performance gems like vectorization and parallelization. Work in progress.
+- **train_gpt2_basic.mojo**: Basic port of train_gpt2.c to Mojo, which does not leverage Mojo's capabilities. Beyond the initial commit, we will not provide further updates for the 'train_gpt2_basic' version, except for necessary bug fixes.
+- **train_gpt2.mojo**: Enhanced version utilizing Mojo's performance gems like vectorization and parallelization. Work in progress.
 
 ## How to use
 
