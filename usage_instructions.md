@@ -34,7 +34,7 @@ python train_gpt2.py
 
 ### Step 4: Train the Model
 
-Ensure Mojo is installed by following the [Get started with Mojo 🔥](https://docs.modular.com/mojo/manual/get-started/) guide. Train your model by running:
+Ensure Mojo (version 24.2.1) is installed by following the [Get started with Mojo 🔥](https://docs.modular.com/mojo/manual/get-started/) guide. Train your model by running:
 
  ```bash
  mojo train_gpt2.mojo
