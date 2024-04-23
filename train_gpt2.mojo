@@ -580,7 +580,7 @@ fn gelu_forward(out: DTypePointer[dtype], inp: DTypePointer[dtype], N: Int):
 
         vectorize[_op, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](num_vectorize)
 
-    parallelize[_calc](NUM_PARALLELIZE, NUM_PARALLELIZE)
+    parallelize[_calc](NUM_PARALLELIZE)
 
 
 fn gelu_backward(
@@ -613,7 +613,7 @@ fn gelu_backward(
 
         vectorize[_op, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](num_vectorize)
 
-    parallelize[_calc](NUM_PARALLELIZE, NUM_PARALLELIZE)
+    parallelize[_calc](NUM_PARALLELIZE)
 
 
 fn residual_forward(
@@ -635,7 +635,7 @@ fn residual_forward(
 
         vectorize[_op, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](num_vectorize)
 
-    parallelize[_calc](NUM_PARALLELIZE, NUM_PARALLELIZE)
+    parallelize[_calc](NUM_PARALLELIZE)
 
 
 fn residual_backward(
@@ -661,7 +661,7 @@ fn residual_backward(
 
         vectorize[_op, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](num_vectorize)
 
-    parallelize[_calc](NUM_PARALLELIZE, NUM_PARALLELIZE)
+    parallelize[_calc](NUM_PARALLELIZE)
 
 
 fn softmax_forward(
@@ -1535,7 +1535,7 @@ fn gpt2_update(
 
         vectorize[_op, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](num_vectorize)
 
-    parallelize[_calc](NUM_PARALLELIZE, NUM_PARALLELIZE)
+    parallelize[_calc](NUM_PARALLELIZE)
 
 
 fn gpt2_free(inout model: GPT2):
