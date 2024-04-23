@@ -77,7 +77,7 @@ fn encoder_forward(
 
             vectorize[_op, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](size=C)
 
-    parallelize[_calc](B, B)
+    parallelize[_calc](B)
 
 
 fn encoder_backward(
@@ -105,7 +105,7 @@ fn encoder_backward(
 
             vectorize[_op, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](size=C)
 
-    parallelize[_calc](B, B)
+    parallelize[_calc](B)
 
 
 fn layernorm_forward(
@@ -168,7 +168,7 @@ fn layernorm_forward(
             mean[b * T + t] = m
             rstd[b * T + t] = s
 
-    parallelize[_calc](B, B)
+    parallelize[_calc](B)
 
 
 fn layernorm_backward(
@@ -238,7 +238,7 @@ fn layernorm_backward(
 
             vectorize[_op2, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](size=C)
 
-    parallelize[_calc](B, B)
+    parallelize[_calc](B)
 
 
 fn matmul_forward(
@@ -278,7 +278,7 @@ fn matmul_forward(
 
                 out_bt[o] = val
 
-    parallelize[_calc](B, B)
+    parallelize[_calc](B)
 
 
 fn matmul_backward(
@@ -318,7 +318,7 @@ fn matmul_backward(
 
                 vectorize[_op, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](size=C)
 
-    parallelize[_calc](B, B)
+    parallelize[_calc](B)
     # backward into weight/bias, parallelize over output channels OC
     # pragma omp parallel for
 
@@ -342,7 +342,7 @@ fn matmul_backward(
 
                 vectorize[_op, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](size=C)
 
-    parallelize[_calc2](OC, OC)
+    parallelize[_calc2](OC)
 
 
 fn attention_forward(
@@ -448,7 +448,7 @@ fn attention_forward(
 
                     vectorize[_op4, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](size=hs)
 
-    parallelize[_calc](B, B)
+    parallelize[_calc](B)
 
 
 fn attention_backward(
@@ -560,7 +560,7 @@ fn attention_backward(
 
                     vectorize[_op2, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](size=hs)
 
-    parallelize[_calc](B, B)
+    parallelize[_calc](B)
 
 
 fn gelu_forward(out: DTypePointer[dtype], inp: DTypePointer[dtype], N: Int):
@@ -703,7 +703,7 @@ fn softmax_forward(
 
             vectorize[_op2, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](size=V)
 
-    parallelize[_calc](B, B)
+    parallelize[_calc](B)
 
 
 fn crossentropy_forward(
@@ -726,7 +726,7 @@ fn crossentropy_forward(
             var ix = targets[b * T + t]
             losses[b * T + t] = -log(probs_bt[ix])
 
-    parallelize[_calc](B, B)
+    parallelize[_calc](B)
 
 
 fn crossentropy_softmax_backward(
@@ -761,7 +761,7 @@ fn crossentropy_softmax_backward(
             if ix >= 0 and ix < V:
                 dlogits_bt[ix] -= dloss
 
-    parallelize[_calc](B, B)
+    parallelize[_calc](B)
 
 
 # ----------------------------------------------------------------------------
