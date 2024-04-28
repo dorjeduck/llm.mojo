@@ -26,7 +26,7 @@ For a more detailed step-by-step guide including additional setup details and op
 
 Basic benchmark results: (M2 MacBook Pro)
 
-- Below are the average training loop times observed across the various programs. Please note that these results are intended to provide a general comparison rather than precise, repeatable metrics.
+- Below are the average training loop times observed across the various implementations. Please note that these results are intended to provide a general comparison rather than precise, repeatable metrics.
 
 - We are running the OpenMP-enabled train_gpt2.c with 64 threads.
   (`OMP_NUM_THREADS=64 ./train_gpt2`)
