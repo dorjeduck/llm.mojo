@@ -1,6 +1,7 @@
 from collections.vector import InlinedFixedVector
 from math import abs
 from time import now
+from sys import exit
 
 from train_gpt2 import (
     GPT2,
@@ -73,13 +74,8 @@ fn main() raises:
 
     # load additional information that we will use for debugging and error checking
 
-    var state_file: FileHandle
-
-    try:
-        state_file = open("gpt2_124M_debug_state.bin", "r")
-    except:
-        print("Error opening state file")
-
+    
+    var state_file = open("gpt2_124M_debug_state.bin", "r")
     var bytes_of_config_state = 256 * sizeof[DType.int32]()
 
     var state_data_raw = state_file.read(bytes_of_config_state)
@@ -88,11 +84,13 @@ fn main() raises:
 
     if state_header[0] != 20240327:
         print("Bad magic model file")
-        # EXIT_1
-    if state_header[1] != 1:
-        print("Bad version in model file")
-        # EXIT_1
+        exit(1)
+    if state_header[1] != 2:
+        print("Bad version in model file:",state_header[1])
+        exit(1)
 
+
+   
     var B: Int = int(state_header[2])  # batch size, e.g. 4
     var T: Int = int(state_header[3])  # time / sequence length (e.g. 64, up to maxT)
 
