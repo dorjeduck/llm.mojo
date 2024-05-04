@@ -9,7 +9,7 @@ This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/
 
 ## Note
 
-Due to a bug in Mojo 24.3, `train_gpt2.mojo' starts with a warning right now, but runs correctly. A fix for this bug is currently in review by Modular ([modularml/mojo#2429](https://github.com/modularml/mojo/issues/2429)
+Due to a bug in Mojo 24.3, `train_gpt2.mojo' starts with a warning right now, but runs correctly. A fix for this bug is currently in review by Modular ([modularml/mojo#2429](https://github.com/modularml/mojo/issues/2429))
 
 
 ## How to use
