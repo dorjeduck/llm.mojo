@@ -7,11 +7,16 @@ This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/
 - **train_gpt2_basic.mojo**: Basic port of train_gpt2.c to Mojo, which does not leverage Mojo's capabilities. Beyond the initial commit, we will not provide further updates for the 'train_gpt2_basic' version, except for necessary bug fixes.
 - **train_gpt2.mojo**: Enhanced version utilizing Mojo's performance gems like vectorization and parallelization. Work in progress.
 
+## Note
+
+Due to a bug in Mojo 24.3, `train_gpt2.mojo' starts with a warning right now, but runs correctly. The fix for this bug is currently in review by Modular ([modularml/mojo#2429](https://github.com/modularml/mojo/issues/2429)
+
+
 ## How to use
 
 Visit [llm.c](https://github.com/karpathy/llm.c) for a detailed explanation of the original project.
 
-Ensure that you have Mojo version 24.2.1 installed. To use llm.mojo, run:
+Ensure that you have Mojo version 24.3 installed. To use llm.mojo, run:
 
 ```bash
 pip install -r requirements.txt
