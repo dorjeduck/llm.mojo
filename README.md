@@ -7,10 +7,15 @@ This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/
 - **train_gpt2_basic.mojo**: Basic port of train_gpt2.c to Mojo, which does not leverage Mojo's capabilities. Beyond the initial commit, we will not provide further updates for the 'train_gpt2_basic' version, except for necessary bug fixes.
 - **train_gpt2.mojo**: Enhanced version utilizing Mojo's performance gems like vectorization and parallelization. Work in progress.
 
-## Note
+## Notes
 
-Due to a bug in Mojo 24.3, `train_gpt2.mojo' starts with a warning right now, but runs correctly. A fix for this bug is currently in review by Modular ([modularml/mojo#2429](https://github.com/modularml/mojo/issues/2429))
-
+- To operate the latest version of llm.🔥, ensure you install Mojo 24.3.
+- If you have previously used llm.🔥 with an earlier version than Mojo 24.3, you must first rerun the preparation scripts. Execute the following commands:
+```bash
+python prepro_tinyshakespeare.py  
+python train_gpt2.py
+```
+- Due to a bug in Mojo 24.3, `train_gpt2.mojo' starts with a warning right now, but runs correctly. A fix for this bug is currently in review by Modular ([modularml/mojo#2429](https://github.com/modularml/mojo/issues/2429))
 
 ## How to use
 
