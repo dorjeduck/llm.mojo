@@ -5,7 +5,7 @@ from memory import memset, memset_zero, memcpy
 from python import Python
 from time import now
 from sys.info import is_apple_silicon
-
+from sys import exit
 
 fn get_simd_width() -> Int:
     if is_apple_silicon():
@@ -34,10 +34,6 @@ alias NULL_INT = DTypePointer[dtype_int]()
 alias M_PI: FLOAT = 3.141592653589793115997963468544185161590576171875
 
 alias GPT2_EOT = 50256
-
-alias EXIT_1 = external_call["exit", Int](1)
-
-
 
 alias NUM_PARALLELIZE = 8
 alias UNROLL_FACTOR = 4
@@ -665,19 +661,20 @@ fn residual_backward(
 
 
 fn softmax_forward(
-    probs: DTypePointer[dtype], logits: DTypePointer[dtype], B: Int, T: Int, V: Int
+    probs: DTypePointer[dtype], logits: DTypePointer[dtype], B: Int, T: Int,V:Int, Vp: Int
 ):
-    # output: probs are (B,T,V) of the probabilities
-    # input: logits is (B,T,V) of the unnormalized log probabilities
-    # pragma omp parallel for collapse(2)
+    # output: probs are (B,T,Vp) of the probabilities (sums to 1.0 in each b,t position)
+    # input: logits is (B,T,Vp) of the unnormalized log probabilities
+    # Vp is the padded vocab size (for efficiency), V is the "real" vocab size
+    # example: Vp is 50304 and V is 50257
 
     @parameter
     fn _calc(b: Int):
         # for b in range(B):
         for t in range(T):
             # probs <- softmax(logits)
-            var logits_bt: DTypePointer[dtype] = logits + b * T * V + t * V
-            var probs_bt: DTypePointer[dtype] = probs + b * T * V + t * V
+            var logits_bt: DTypePointer[dtype] = logits + b * T * Vp + t * Vp
+            var probs_bt: DTypePointer[dtype] = probs + b * T * Vp + t * Vp
 
             var maxval: FLOAT = -10000.0  # TODO something better
             for i in range(V):
@@ -703,6 +700,20 @@ fn softmax_forward(
 
             vectorize[_op2, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](size=V)
 
+
+            # for extra super safety we may wish to include this too,
+            # forcing the probabilities here to be zero, but it shouldn't matter
+            
+            @parameter
+            fn _op3[width: Int](iv: Int):
+                probs_bt.store[width=width](
+                    iv+V,0.0
+                ) 
+            vectorize[_op3, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](size=Vp-V)
+
+            
+           
+
     parallelize[_calc](B)
 
 
@@ -712,17 +723,17 @@ fn crossentropy_forward(
     targets: DTypePointer[dtype_int],
     B: Int,
     T: Int,
-    V: Int,
+    Vp: Int
 ):
     # output: losses is (B,T) of the individual losses at each position
-    # input: probs are (B,T,V) of the probabilities
+    # input: probs are (B,T,Vp) of the probabilities
     # input: targets is (B,T) of integers giving the correct index in logits
 
     @parameter
     fn _calc(b: Int):
         for t in range(T):  # todo
             # loss = -log(probs[target])
-            var probs_bt: DTypePointer[dtype] = probs + b * T * V + t * V
+            var probs_bt: DTypePointer[dtype] = probs + b * T * Vp + t * Vp
             var ix = targets[b * T + t]
             losses[b * T + t] = -log(probs_bt[ix])
 
@@ -737,14 +748,15 @@ fn crossentropy_softmax_backward(
     B: Int,
     T: Int,
     V: Int,
+    Vp: Int
 ):
     # backwards through both softmax and crossentropy
 
     @parameter
     fn _calc(b: Int):
         for t in range(T):
-            var dlogits_bt: DTypePointer[dtype] = dlogits + b * T * V + t * V
-            var probs_bt: DTypePointer[dtype] = probs + b * T * V + t * V
+            var dlogits_bt: DTypePointer[dtype] = dlogits + b * T * Vp + t * Vp
+            var probs_bt: DTypePointer[dtype] = probs + b * T * Vp + t * Vp
             var dloss: FLOAT = dlosses[b * T + t]
             var ix = targets[b * T + t]
 
@@ -858,7 +870,7 @@ struct ParameterTensors:
 alias NUM_ACTIVATION_TENSORS = 23
 
 
-@register_passable("trivial")
+@value
 struct ActivationTensors:
     var encoded: DTypePointer[dtype]  # (B, T, C)
     var ln1: DTypePointer[dtype]  # (L, B, T, C)
@@ -962,6 +974,7 @@ struct GPT2Config:
     var num_layers: Int  # number of layers, e.g. 12
     var num_heads: Int  # number of heads in attention, e.g. 12
     var channels: Int  # number of channels, e.g. 768
+    var padded_vocab_size:Int # padded to e.g. %128==0, 50304
 
 
 struct GPT2:
@@ -1014,11 +1027,11 @@ struct GPT2:
         var model_header = config_data_raw._steal_ptr().bitcast[DType.int32]()
 
         if model_header[0] != 20240326:
-            print("Bad magic model file")
-            # EXIT_1
-        if model_header[1] != 1:
+            print("Bad magic model file",model_header[0])
+            exit(1)
+        if model_header[1] != 3:
             print("Bad version in model file")
-            # EXIT_1
+            exit(1)
 
         # read in hyperparameters
 
@@ -1028,23 +1041,19 @@ struct GPT2:
             int(model_header[4]),
             int(model_header[5]),
             int(model_header[6]),
+            int(model_header[7]),
         )
-
+       
         var maxT: Int = self.config.max_seq_len
         var V: Int = self.config.vocab_size
         var L: Int = self.config.num_layers
         var NH: Int = self.config.num_heads
         var C: Int = self.config.channels
+        var Vp: Int = self.config.padded_vocab_size
 
-        print("[GPT-2]")
-        print("max_seq_len:", self.config.max_seq_len)
-        print("vocab_size:", self.config.vocab_size)
-        print("num_layers:", self.config.num_layers)
-        print("num_heads:", self.config.num_heads)
-        print("channels:", self.config.channels)
-
+        
         # allocate space for all the parameters and read them in
-        self.param_sizes[0] = V * C
+        self.param_sizes[0] = Vp * C
         self.param_sizes[1] = maxT * C
         self.param_sizes[2] = L * C
         self.param_sizes[3] = L * C
@@ -1067,7 +1076,7 @@ struct GPT2:
         for i in range(NUM_PARAMETER_TENSORS):
             num_parameters += self.param_sizes[i]
 
-        print("num_parameters:", num_parameters)
+       
         self.num_parameters = num_parameters
 
         # read in all the parameters from file
@@ -1099,6 +1108,17 @@ struct GPT2:
         self.grads = ParameterTensors()
         self.grads_acts = ActivationTensors()
 
+        print("[GPT-2]")
+        print("max_seq_len:", self.config.max_seq_len)
+        print("vocab_size:", self.config.vocab_size)
+        print("padded_vocab_size:", self.config.padded_vocab_size)
+        print("num_layers:", self.config.num_layers)
+        print("num_heads:", self.config.num_heads)
+        print("channels:", self.config.channels)
+
+        print("num_parameters:", num_parameters)
+
+
 
 fn gpt2_forward(
     inout model: GPT2,
@@ -1115,6 +1135,7 @@ fn gpt2_forward(
 
     # convenience parameters
     var V: Int = model.config.vocab_size
+    var Vp: Int = model.config.padded_vocab_size
     var L: Int = model.config.num_layers
     var NH: Int = model.config.num_heads
     var C: Int = model.config.channels
@@ -1146,8 +1167,8 @@ fn gpt2_forward(
         model.act_sizes[17] = B * T * C
         model.act_sizes[18] = B * T
         model.act_sizes[19] = B * T
-        model.act_sizes[20] = B * T * V
-        model.act_sizes[21] = B * T * V
+        model.act_sizes[20] = B * T * Vp
+        model.act_sizes[21] = B * T * Vp
         model.act_sizes[22] = B * T
 
         var num_activations: Int = 0
@@ -1253,13 +1274,13 @@ fn gpt2_forward(
         C,
     )
     matmul_forward(
-        model.acts.logits, model.acts.lnf, model.params.wte, NULL, B, T, C, V
+        model.acts.logits, model.acts.lnf, model.params.wte, NULL, B, T, C, Vp
     )
-    softmax_forward(model.acts.probs, model.acts.logits, B, T, V)
+    softmax_forward(model.acts.probs, model.acts.logits, B, T, V,Vp)
 
     # also forward the cross-entropy loss function if we have the targets
     if targets != NULL_INT:
-        crossentropy_forward(model.acts.losses, model.acts.probs, targets, B, T, V)
+        crossentropy_forward(model.acts.losses, model.acts.probs, targets, B, T, Vp)
         # for convenience also evaluate the mean loss
         var mean_loss: FLOAT = 0.0
         for i in range(B * T):
@@ -1296,13 +1317,18 @@ fn gpt2_backward(inout model: GPT2):
     var B: Int = model.batch_size
     var T: Int = model.seq_len
     var V: Int = model.config.vocab_size
+    var Vp: Int = model.config.padded_vocab_size
     var L: Int = model.config.num_layers
     var NH: Int = model.config.num_heads
     var C: Int = model.config.channels
 
     # backward pass
 
-    # we kick off the chain by filling in dlosses with 1.0/(B*T), to get the mean loss
+    # we kick off the chain rule by filling in dlosses with 1.0f/(B*T)
+    # technically this is a small, inline backward() pass of calculating
+    # total, final loss as the mean over all losses over all (B,T) positions in the batch
+  
+    
     var dloss_mean: FLOAT = 1.0 / (B * T)
 
     @parameter
@@ -1319,6 +1345,7 @@ fn gpt2_backward(inout model: GPT2):
         B,
         T,
         V,
+        Vp
     )
     matmul_backward(
         model.grads_acts.lnf,
@@ -1330,7 +1357,7 @@ fn gpt2_backward(inout model: GPT2):
         B,
         T,
         C,
-        V,
+        Vp,
     )
     var residual: DTypePointer[dtype] = model.acts.residual3 + (
         L - 1
@@ -1591,13 +1618,12 @@ fn dataloader_init(
 ) raises:
     loader.B = B
     loader.T = T
-
-    # open the input file for reading
     try:
-        loader.tokens_file = open(filename, "rb")
+        loader.tokens_file = open(filename, "rb")^
     except e:
-        print("Error opening tokens file", e)
-
+        print("Error opening file",filename,e)
+        exit(1)
+      
     # determine the file size
     var _os = Python.import_module("os")
     loader.file_size = int(_os.path.getsize(filename))
@@ -1614,6 +1640,7 @@ fn dataloader_init(
     loader.targets = loader.batch + 1  # targets are shifted by one
     loader.num_batches = loader.file_size // (B * T * SIZEOF_INT)
 
+    
 
 fn dataloader_reset(inout loader: DataLoader):
     loader.current_position = 0
@@ -1628,7 +1655,7 @@ fn dataloader_next_batch(inout loader: DataLoader) raises:
         loader.current_position = 0
 
     # read the B*T+1 integers from the file into batch
-    _ = loader.tokens_file.seek(loader.current_position)
+    var q = loader.tokens_file.seek(loader.current_position)
 
     # config_data_raw id Tensor[DType.int8] with bytes_of_config_params elements
     var data_raw = loader.tokens_file.read((B * T + 1) * sizeof[DType.int32]())
@@ -1706,11 +1733,11 @@ struct Tokenizer:
         var header = data_raw._steal_ptr().bitcast[DType.int32]()
 
         if header[0] != 20240328:
-            print("Bad magic model file")
-            # EXIT_1
-        if header[1] != 1:
-            print("Bad version in model file")
-            # EXIT_1
+            print("Bad magic model file",header[0])
+            exit(1)
+        if header[1] != 2:
+            print("Bad version in model file", header[1])
+            exit(1)
 
         self.vocab_size = int(header[2])
 
@@ -1826,7 +1853,7 @@ fn main() raises:
                 # leaving this alone because you want separate code for inference anyway
                 # the inference here is just for sanity checking purposes
                 gpt2_forward(model, gen_tokens, NULL_INT, 1, t)
-                var probs = model.acts.probs + (t - 1) * model.config.vocab_size
+                var probs = model.acts.probs + (t - 1) * model.config.padded_vocab_size
                 var coin: FLOAT = random_f32(rng_state).cast[dtype]()
                 var next_token: Int = sample_mult(probs, model.config.vocab_size, coin)
                 gen_tokens[t] = next_token

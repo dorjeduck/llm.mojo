@@ -52,6 +52,8 @@ We ported `test_gpt2.c` from the original repository to Mojo to validate our por
   
 ## Changelog
 
+- 2024.05.04
+  - Update llm.c changes
 - 2024.04.20
   - Further optimization (utilizing unroll_factor of vectorize)
 - 2024.04.19
