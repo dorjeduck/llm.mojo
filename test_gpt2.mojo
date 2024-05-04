@@ -63,10 +63,12 @@ fn check_tensor(
         print("TENSOR NOT OK, maxdif =", maxdiff)
     return ok
 
-fn read_to_dtype_pointer[T:DType](file_handle:FileHandle,num:Int) raises -> DTypePointer[T] :
-    var ptr = DTypePointer[T].alloc(num)
+fn read_to_dtype_pointer[T:DType](inout ptr:DTypePointer[T],file_handle:FileHandle,num:Int,alloc:Bool=False) raises -> None :
+    if alloc:
+        ptr = DTypePointer[T].alloc(num)
     _ = file_handle.read(ptr,num)
-    return ptr
+    
+   
 
 fn main() raises:
     # build the GPT-2 model from a checkpoint
@@ -82,7 +84,8 @@ fn main() raises:
     
     var state_file = open("gpt2_124M_debug_state.bin", "r")
    
-    var state_header = read_to_dtype_pointer[DType.int32](state_file,256)
+    var state_header = DTypePointer[DType.int32].alloc(256)
+    read_to_dtype_pointer[DType.int32](state_header,state_file,256)
 
     if state_header[0] != 20240327:
         print("Bad magic model file")
@@ -115,11 +118,11 @@ fn main() raises:
    
     # read reference information from Python
 
-    x = read_to_dtype_pointer[DType.int32](state_file,B*T)
-    y = read_to_dtype_pointer[DType.int32](state_file,B*T)
-    expected_logits = read_to_dtype_pointer[DType.float32](state_file,B*T*V)
-    expected_loss = read_to_dtype_pointer[DType.float32](state_file,1)
-    expected_grads_memory = read_to_dtype_pointer[DType.float32](state_file,model.num_parameters)
+    read_to_dtype_pointer[DType.int32](x,state_file,B*T)
+    read_to_dtype_pointer[DType.int32](y,state_file,B*T)
+    read_to_dtype_pointer[DType.float32](expected_logits,state_file,B*T*V)
+    read_to_dtype_pointer[DType.float32](expected_loss,state_file,1)
+    read_to_dtype_pointer[DType.float32](expected_grads_memory,state_file,model.num_parameters)
 
 
     state_file.close()

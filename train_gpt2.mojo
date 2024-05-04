@@ -1020,11 +1020,8 @@ struct GPT2:
 
         var model_file = open(checkpoint_path, "r")
 
-        var bytes_of_config_params = 256 * sizeof[DType.int32]()
-        # config_data_raw id Tensor[DType.int8] with bytes_of_config_params elements
-        var config_data_raw = model_file.read(bytes_of_config_params)
-
-        var model_header = config_data_raw._steal_ptr().bitcast[DType.int32]()
+        var model_header = DTypePointer[dtype.int32].alloc(256)
+        read_to_dtype_pointer[DType.int32](model_header,model_file,256)
 
         if model_header[0] != 20240326:
             print("Bad magic model file",model_header[0])
@@ -1083,13 +1080,9 @@ struct GPT2:
         self.params = ParameterTensors()
         self.params_memory = self.params.alloc_and_point_parameters(self.param_sizes)
 
-        var data_raw = model_file.read(num_parameters * sizeof[DType.float32]())
-
-        model_file.close()
-
-        var float32_ptr = data_raw._steal_ptr().bitcast[DType.float32]()   
-        memcpy(dest=self.params_memory, src=float32_ptr, count=num_parameters)
-
+        read_to_dtype_pointer[DType.float32](self.params_memory,model_file,num_parameters)
+        model_file.close() 
+        
         # other inits
         self.acts = ActivationTensors()
         self.num_activations = 0  # for now
@@ -1657,10 +1650,7 @@ fn dataloader_next_batch(inout loader: DataLoader) raises:
     # read the B*T+1 integers from the file into batch
     var q = loader.tokens_file.seek(loader.current_position)
 
-    # config_data_raw id Tensor[DType.int8] with bytes_of_config_params elements
-    var data_raw = loader.tokens_file.read((B * T + 1) * sizeof[DType.int32]())
-    var int_ptr = data_raw._steal_ptr().bitcast[DType.int32]() 
-    memcpy(dest=loader.batch, src=int_ptr, count=B * T + 1)
+    read_to_dtype_pointer(loader.batch,loader.tokens_file,B * T + 1)
 
     # advance the current position by B*T integers
     loader.current_position += B * T * SIZEOF_INT
@@ -1726,11 +1716,9 @@ struct Tokenizer:
             self.init_ok = 0
             return
 
-        var num_bytes = 256 * sizeof[DType.int32]()
-
-        var data_raw = file.read(num_bytes)
-
-        var header = data_raw._steal_ptr().bitcast[DType.int32]()
+    
+        var header = DTypePointer[DType.int32].alloc(256)
+        read_to_dtype_pointer(header,file,256)
 
         if header[0] != 20240328:
             print("Bad magic model file",header[0])
@@ -1780,6 +1768,11 @@ struct Tokenizer:
         # }
 
         print(str, end="")
+
+fn read_to_dtype_pointer[T:DType](inout ptr:DTypePointer[T],file_handle:FileHandle,num:Int,alloc:Bool=False) raises -> None :
+    if alloc:
+        ptr = DTypePointer[T].alloc(num)
+    _ = file_handle.read(ptr,num)
 
 
 # ----------------------------------------------------------------------------
