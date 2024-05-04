@@ -9,13 +9,13 @@ This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/
 
 ## Notes
 
-- To operate the latest version of llm.🔥, ensure you install Mojo 24.3.
-- If you have previously used llm.🔥 with an earlier version than Mojo 24.3, you must first rerun the preparation scripts. Execute the following commands:
+- To use the latest version of llm.🔥, please ensure you install Mojo 24.3.
+-  The preparation scripts have been updated. If you have previously used llm.🔥, please rerun the following commands:
 ```bash
 python prepro_tinyshakespeare.py  
 python train_gpt2.py
 ```
-- Due to a bug in Mojo 24.3, `train_gpt2.mojo' starts with a warning right now, but runs correctly. A fix for this bug is currently in review by Modular ([modularml/mojo#2429](https://github.com/modularml/mojo/issues/2429))
+- Due to a bug in Mojo 24.3, 'train_gpt2.mojo' starts with a warning right now, but runs correctly. A fix for this bug is currently in review by Modular ([modularml/mojo#2429](https://github.com/modularml/mojo/issues/2429))
 
 ## How to use
 
