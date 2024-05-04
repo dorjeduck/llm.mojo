@@ -63,6 +63,11 @@ fn check_tensor(
         print("TENSOR NOT OK, maxdif =", maxdiff)
     return ok
 
+fn read_to_dtype_pointer[T:DType](file_handle:FileHandle,num:Int) raises -> DTypePointer[T] :
+    var ptr = DTypePointer[T].alloc(num)
+    _ = file_handle.read(ptr,num)
+    return ptr
+
 fn main() raises:
     # build the GPT-2 model from a checkpoint
     var model = GPT2("gpt2_124M.bin")
@@ -76,11 +81,8 @@ fn main() raises:
 
     
     var state_file = open("gpt2_124M_debug_state.bin", "r")
-    var bytes_of_config_state = 256 * sizeof[DType.int32]()
-
-    var state_data_raw = state_file.read(bytes_of_config_state)
-
-    var state_header = state_data_raw._steal_ptr().bitcast[DType.int32]()
+   
+    var state_header = read_to_dtype_pointer[DType.int32](state_file,256)
 
     if state_header[0] != 20240327:
         print("Bad magic model file")
@@ -110,30 +112,15 @@ fn main() raises:
 
     var expected_logits = DTypePointer[dtype]().alloc(B * T * V)
     var expected_loss = DTypePointer[dtype]().alloc(1)
-
+   
     # read reference information from Python
 
-    var data_raw = state_file.read(((B * T) * SIZEOF_INT))
-    var int32_ptr = data_raw._steal_ptr().bitcast[DType.int32]()
-    memcpy(dest=x, src=int32_ptr, count=(B * T))
+    x = read_to_dtype_pointer[DType.int32](state_file,B*T)
+    y = read_to_dtype_pointer[DType.int32](state_file,B*T)
+    expected_logits = read_to_dtype_pointer[DType.float32](state_file,B*T*V)
+    expected_loss = read_to_dtype_pointer[DType.float32](state_file,1)
+    expected_grads_memory = read_to_dtype_pointer[DType.float32](state_file,model.num_parameters)
 
-    data_raw = state_file.read(((B * T) * SIZEOF_INT))
-    int32_ptr = data_raw._steal_ptr().bitcast[DType.int32]()
-    memcpy(dest=y, src=int32_ptr, count=(B * T))
-
-    data_raw = state_file.read(((B * T * V) * SIZEOF_FLOAT))
-    var float32_ptr = data_raw._steal_ptr().bitcast[DType.float32]()
-    memcpy(dest=expected_logits, src=float32_ptr, count=(B * T * V))
-
-    data_raw = state_file.read(SIZEOF_FLOAT)
-    float32_ptr = data_raw._steal_ptr().bitcast[DType.float32]()
-    memcpy(dest=expected_loss, src=float32_ptr, count=1)
-
-    data_raw = state_file.read(((model.num_parameters) * SIZEOF_FLOAT))
-    float32_ptr = data_raw._steal_ptr().bitcast[DType.float32]()
-    memcpy(
-        dest=expected_grads_memory, src=float32_ptr, count=model.num_parameters
-    )
 
     state_file.close()
 
