@@ -1,5 +1,4 @@
 from collections.vector import InlinedFixedVector
-from math import abs
 from time import now
 from sys import exit
 
@@ -256,7 +255,7 @@ fn main() raises:
             + " (took "
             + str(elapsed_time_ms)
             + " ms) OK = "
-            + step_loss_ok
+            + str(step_loss_ok)
         )
 
     print("overall okay:", allok)
