@@ -10,6 +10,7 @@ This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/
 ## Notes
 
 - To use the latest version of llm.🔥, please ensure you have [Mojo 24.4](https://docs.modular.com/mojo/manual/get-started/) installed.
+- Before using llm.🔥 for the first time, please run the following preparatory commands:
 
 ```bash
 python prepro_tinyshakespeare.py  
