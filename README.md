@@ -9,13 +9,12 @@ This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/
 
 ## Notes
 
-- To use the latest version of llm.🔥, please ensure you have [Mojo 24.3](https://docs.modular.com/mojo/manual/get-started/) installed.
--  The preparation scripts have been updated. If you have previously used llm.🔥, please rerun the following commands:
+- To use the latest version of llm.🔥, please ensure you have [Mojo 24.4](https://docs.modular.com/mojo/manual/get-started/) installed.
+
 ```bash
 python prepro_tinyshakespeare.py  
 python train_gpt2.py
 ```
-- Due to a known issue in Mojo 24.3, 'train_gpt2.mojo' currently starts with a warning but operates correctly. A fix for this bug is under review by the Modular team.([modularml/mojo#2429](https://github.com/modularml/mojo/issues/2429))
 
 ## How to use
 
@@ -62,6 +61,8 @@ We ported `test_gpt2.c` from the original repository to Mojo to validate our por
   
 ## Changelog
 
+- 2024.06.07
+  - Update to Mojo 24.4
 - 2024.05.04
   - Update to Mojo 24.3
   - Update llm.c changes

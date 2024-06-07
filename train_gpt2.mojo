@@ -1,6 +1,6 @@
 from algorithm import vectorize, parallelize
 from collections.vector import InlinedFixedVector
-from math import sqrt, rsqrt, exp, tanh, cosh, log, pow, max
+from math import sqrt, rsqrt, exp, tanh, cosh, log
 from memory import memset, memset_zero, memcpy
 from python import Python
 from time import now
@@ -735,7 +735,7 @@ fn crossentropy_forward(
             # loss = -log(probs[target])
             var probs_bt: DTypePointer[dtype] = probs + b * T * Vp + t * Vp
             var ix = targets[b * T + t]
-            losses[b * T + t] = -log(probs_bt[ix])
+            losses[b * T + t] = -log(probs_bt.load(ix))
 
     parallelize[_calc](B)
 
@@ -771,7 +771,7 @@ fn crossentropy_softmax_backward(
             vectorize[_op, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](size=V)
 
             if ix >= 0 and ix < V:
-                dlogits_bt[ix] -= dloss
+                dlogits_bt.store(ix,dlogits_bt.load(ix)-dloss)
 
     parallelize[_calc](B)
 
@@ -1612,7 +1612,7 @@ fn dataloader_init(
     loader.B = B
     loader.T = T
     try:
-        loader.tokens_file = open(filename, "rb")^
+        loader.tokens_file = open(filename, "rb")
     except e:
         print("Error opening file",filename,e)
         exit(1)
@@ -1749,25 +1749,25 @@ struct Tokenizer:
         else:
             return ""
 
-    fn safe_printf(self, str: String):
+    fn safe_printf(self, s: String):
         # the tokens are raw bytes, and we we only want to print the printable ones
         # many bytes can be various control codes, backspace, etc.
-        if str == NULL:
+        if s == str(NULL):
             return
-        if str[0] == "\0":
+        if s[0] == "\0":
             return
         # handle individual byte tokens
         # every token is asserted to be at least one byte so doing piece[1] is ok
 
         ### --- TODO
-        # if (str[1] == '\0') {
+        # if (s[1] == '\0') {
         # unsigned char byte_val = piece[0];
         # if (!(isprint(byte_val) || isspace(byte_val))) {
         #    return; // weird byte, don't print it
         # }
         # }
 
-        print(str, end="")
+        print(s, end="")
 
 fn read_to_dtype_pointer[T:DType](inout ptr:DTypePointer[T],file_handle:FileHandle,num:Int,alloc:Bool=False) raises -> None :
     if alloc:
@@ -1881,9 +1881,9 @@ fn main() raises:
             + ": train loss "
             + str(model.mean_loss)
             + " (took "
-            + int(elapsed_time_ms)
+            + str(int(elapsed_time_ms))
             + " ms, average: "
-            + int(elapsed_time_ms_total / (step + 1))
+            + str(int(elapsed_time_ms_total / (step + 1)))
             + " ms)"
         )
 
