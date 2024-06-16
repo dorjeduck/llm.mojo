@@ -21,7 +21,7 @@ python train_gpt2.py
 
 Visit [llm.c](https://github.com/karpathy/llm.c) for a detailed explanation of the original project.
 
-Ensure that you have Mojo version 24.3 installed. To use llm.mojo, run:
+Ensure that you have Mojo version 24.4 installed. To use llm.mojo, run:
 
 ```bash
 pip install -r requirements.txt
