@@ -9,7 +9,8 @@ This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/
 
 ## Notes
 
-- To use the latest version of llm.🔥, please ensure you have [Mojo 24.4](https://docs.modular.com/mojo/manual/get-started/) installed.
+- This repository has not yet been updated to Mojo version 24.5 due to a known issue: [parallelize won't work with local variables](https://github.com/modularml/mojo/issues/3483)
+- To use the latest version of llm.🔥, please ensure you have [Mojo 24.4](https://docs.modular.com/mojo/manual/get-started/) installed. 
 - Before using llm.🔥 for the first time, please run the following preparatory commands:
 
 ```bash
