@@ -1,0 +1,33 @@
+[project]
+authors = ["Martin Dudek <martin.dudek@gmail.com>"]
+channels = ["conda-forge", "https://conda.modular.com/max"]
+description = "port of Andrjey Karpathy's llm.c to Mojo"
+name = "llm.mojo"
+platforms = ["osx-arm64"]
+version = "0.1.0"
+
+[tasks]
+
+[dependencies]
+python = "*"
+
+[feature.nightly]
+channels = ["conda-forge", "https://conda.modular.com/max-nightly"]
+
+[feature.nightly.dependencies]
+max = "*"
+
+[feature.stable]
+
+[feature.stable.dependencies]
+max = ">=24.5,<24.6"
+
+[feature.old]
+
+[feature.old.dependencies]
+max = "==24.4.0"
+
+[environments]
+default = ["stable"]
+nightly = ["nightly"]
+24-4 = ["old"]
