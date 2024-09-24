@@ -14,15 +14,16 @@ This repository has not yet been updated to Mojo version 24.5 due to a known iss
 Before using llm.🔥 for the first time, please run the following preparatory commands:
   
 ```bash
+pip install -e requirements
 python prepro_tinyshakespeare.py  
 python train_gpt2.py
+```
 
 * Ensure that the `Magic` command line tool is installed by following the [Modular Docs](https://docs.modular.com/magic).
 * Run `magic shell -e mojo-24-4` within the root of the cloned repository to install Mojo 24.4, and to activate the project's virtual environment in which you can run the mojo app.
 
 
 
-```
 
 ## How to use
 
