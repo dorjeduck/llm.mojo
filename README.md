@@ -2,7 +2,7 @@
 
 This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/llm.c) to [Mojo](https://docs.modular.com/mojo), currently in beta and subject to changes. Users should expect to encounter bugs and unfinished features. Visit [llm.c](https://github.com/karpathy/llm.c) for a detailed explanation of the original project.
 
-This repository has not yet been updated to Mojo version 24.5 due to a known issue: [parallelize won't work with local variables](https://github.com/modularml/mojo/issues/3483)
+Please note that this repository has not yet been updated to Mojo version 24.5 due to a known issue: [parallelize won't work with local variables](https://github.com/modularml/mojo/issues/3483)
 
 ## Implementation
 
@@ -60,6 +60,8 @@ We ported `test_gpt2.c` from the original repository to Mojo to validate our por
   
 ## Changelog
 
+- 2024.09.24
+  - Update to use the magic command line tool.
 - 2024.06.07
   - Update to Mojo 24.4
 - 2024.05.04
