@@ -10,10 +10,6 @@ version = "0.1.0"
 
 [dependencies]
 python = "*"
-tqdm = "*"
-torch = "*"
-tiktoken = "*"
-transformers = "*"
 
 [feature.nightly]
 channels = ["conda-forge", "https://conda.modular.com/max-nightly"]
