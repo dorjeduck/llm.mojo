@@ -1,6 +1,8 @@
 # llm.🔥
 
-This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/llm.c) to [Mojo](https://docs.modular.com/mojo), currently in beta and subject to changes. Users should expect to encounter bugs and unfinished features.
+This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/llm.c) to [Mojo](https://docs.modular.com/mojo), currently in beta and subject to changes. Users should expect to encounter bugs and unfinished features. Visit [llm.c](https://github.com/karpathy/llm.c) for a detailed explanation of the original project.
+
+This repository has not yet been updated to Mojo version 24.5 due to a known issue: [parallelize won't work with local variables](https://github.com/modularml/mojo/issues/3483)
 
 ## Implementation
 
@@ -9,25 +11,17 @@ This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/
 
 ## Prerequisite
 
-This repository has not yet been updated to Mojo version 24.5 due to a known issue: [parallelize won't work with local variables](https://github.com/modularml/mojo/issues/3483)
-
 Before using llm.🔥 for the first time, please run the following preparatory commands:
   
 ```bash
-pip install -e requirements
+pip install -r requirements
 python prepro_tinyshakespeare.py  
 python train_gpt2.py
 ```
 
-* Ensure that the `Magic` command line tool is installed by following the [Modular Docs](https://docs.modular.com/magic).
-* Run `magic shell -e mojo-24-4` within the root of the cloned repository to install Mojo 24.4, and to activate the project's virtual environment in which you can run the mojo app.
-
-
-
-
 ## How to use
 
-Visit [llm.c](https://github.com/karpathy/llm.c) for a detailed explanation of the original project.
+- Ensure that the `Magic` command line tool is installed by following the [Modular Docs](https://docs.modular.com/magic).
 
 ```bash
 magic shell -e mojo-24-4
