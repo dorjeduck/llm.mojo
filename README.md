@@ -7,27 +7,29 @@ This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/
 - **train_gpt2_basic.mojo**: Basic port of train_gpt2.c to Mojo, which does not leverage Mojo's capabilities. Beyond the initial commit, we will not provide further updates for the 'train_gpt2_basic' version, except for necessary bug fixes.
 - **train_gpt2.mojo**: Enhanced version utilizing Mojo's performance gems like vectorization and parallelization. Work in progress.
 
-## Notes
+## Prerequisite
 
-- This repository has not yet been updated to Mojo version 24.5 due to a known issue: [parallelize won't work with local variables](https://github.com/modularml/mojo/issues/3483)
-- To use the latest version of llm.🔥, please ensure you have [Mojo 24.4](https://docs.modular.com/mojo/manual/get-started/) installed. 
-- Before using llm.🔥 for the first time, please run the following preparatory commands:
+This repository has not yet been updated to Mojo version 24.5 due to a known issue: [parallelize won't work with local variables](https://github.com/modularml/mojo/issues/3483)
 
+Before using llm.🔥 for the first time, please run the following preparatory commands:
+  
 ```bash
 python prepro_tinyshakespeare.py  
 python train_gpt2.py
+
+* Ensure that the `Magic` command line tool is installed by following the [Modular Docs](https://docs.modular.com/magic).
+* Run `magic shell -e mojo-24-4` within the root of the cloned repository to install Mojo 24.4, and to activate the project's virtual environment in which you can run the mojo app.
+
+
+
 ```
 
 ## How to use
 
 Visit [llm.c](https://github.com/karpathy/llm.c) for a detailed explanation of the original project.
 
-Ensure that you have Mojo version 24.4 installed. To use llm.mojo, run:
-
 ```bash
-pip install -r requirements.txt
-python prepro_tinyshakespeare.py  
-python train_gpt2.py
+magic shell -e mojo-24-4
 mojo train_gpt2.mojo
 ```
 
