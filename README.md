@@ -1,6 +1,6 @@
 # llm.🔥
 
-This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/llm.c) to [Mojo](https://docs.modular.com/mojo), currently in beta and subject to changes. Users should expect to encounter bugs and unfinished features. Visit [llm.c](https://github.com/karpathy/llm.c) for a detailed explanation of the original project.
+This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/llm.c) to [Mojo](https://docs.modular.com/mojo), currently in beta. Visit [llm.c](https://github.com/karpathy/llm.c) for a detailed explanation of the original project.
 
 Please note that this repository has not yet been updated to Mojo version 24.5 due to a known issue: [parallelize won't work with local variables](https://github.com/modularml/mojo/issues/3483)
 
@@ -21,7 +21,7 @@ python train_gpt2.py
 
 ## How to use
 
-- Ensure that the `Magic` command line tool is installed by following the [Modular Docs](https://docs.modular.com/magic).
+- Ensure that the [Magic](https://docs.modular.com/max/tutorials/magic) command line tool is installed by following the [Modular Docs](https://docs.modular.com/magic).
 
 ```bash
 magic shell -e mojo-24-4
@@ -61,7 +61,7 @@ We ported `test_gpt2.c` from the original repository to Mojo to validate our por
 ## Changelog
 
 - 2024.09.24
-  - Update to use the magic command line tool.
+  - Switch to the [Magic](https://docs.modular.com/max/tutorials/magic) package management tool by Modular
 - 2024.06.07
   - Update to Mojo 24.4
 - 2024.05.04
