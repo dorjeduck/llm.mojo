@@ -71,6 +71,8 @@ We ported `test_gpt2.c` from the original repository to Mojo to validate our por
   
 ## Changelog
 
+- 2024.09.27
+  - Experimental Mojo 24.5 nightly version
 - 2024.09.24
   - Switch to the [Magic](https://docs.modular.com/max/tutorials/magic) package management tool by Modular
 - 2024.06.07
