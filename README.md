@@ -2,7 +2,7 @@
 
 This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/llm.c) to [Mojo](https://docs.modular.com/mojo), currently in beta. Visit [llm.c](https://github.com/karpathy/llm.c) for a detailed explanation of the original project.
 
-Please note that this repository has not yet been updated to Mojo version 24.5 due to a known issue: [parallelize won't work with local variables](https://github.com/modularml/mojo/issues/3483)
+Please note that this repository has not yet been updated to Mojo version 24.5 because the following issue is only resolved in the nightly release but not in the stable release of Mojo 24.5: [parallelize won't work with local variables](https://github.com/modularml/mojo/issues/3483)
 
 ## Implementation
 
@@ -29,6 +29,17 @@ mojo train_gpt2.mojo
 ```
 
 For a more detailed step-by-step guide including additional setup details and options, please refer to our [detailed usage instructions](./usage_instructions.md).
+
+### Mojo 24.5 nightly
+
+A initial version for the nightly release of Mojo 24.5 is now available for testing:
+
+```bash
+magic shell -e nightly
+mojo train_gpt2_nightly.mojo
+```
+
+Please not that the nightly releases are often subject to breaking changes, so you may encounter issues when running ```train_gpt2_nightly.mojo```.
 
 ## Benchmarks
 
