@@ -65,9 +65,7 @@ We ported `test_gpt2.c` from the original repository to Mojo to validate our por
 
 ## Development Roadmap
 
-- **Implementation Improvement**: Enhance `train_gpt.mojo` to fully exploit Mojo's capabilities, including further optimization for speed and efficiency.
-- **Following Changes of llm.c**: Regularly update the Mojo port to align with the latest improvements and changes made to `llm.c`.
-- **Solid Benchmarks**: Develop comprehensive and reliable benchmarks to accurately measure performance improvements and compare them against other implementations.
+At this stage, there are no plans for further development of this app, except for keeping up with Mojo's latest versions. It primarily serves as a proof of concept, showcasing Mojo's ability to implement C-like applications in terms of speed and low-level programming. That said, I’m always open to new ideas or collaboration opportunities, so feel free to reach out to discuss ideas.
   
 ## Changelog
 
