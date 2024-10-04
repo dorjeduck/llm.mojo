@@ -2,7 +2,7 @@
 
 This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/llm.c) to [Mojo](https://docs.modular.com/mojo), currently in beta. Visit [llm.c](https://github.com/karpathy/llm.c) for a detailed explanation of the original project.
 
-Please note that this repository has not yet been updated to Mojo version 24.5 because the following issue is only resolved in the nightly release but not in the stable release of Mojo 24.5: [parallelize won't work with local variables](https://github.com/modularml/mojo/issues/3483)
+Please note that this repository has not yet been updated to Mojo version 24.5 due to an issue that remains unresolved in the stable release: [parallelize won't work with local variables](https://github.com/modularml/mojo/issues/3483). This issue is addressed in the nightly release, but not in the stable version of Mojo 24.5.
 
 ## Implementation
 
