@@ -39,7 +39,7 @@ magic shell -e nightly
 mojo train_gpt2_nightly.mojo
 ```
 
-Please not that the nightly releases are often subject to breaking changes, so you may encounter issues when running ```train_gpt2_nightly.mojo```.
+Please note that the nightly releases are often subject to breaking changes, so you may encounter issues when running ```train_gpt2_nightly.mojo```.
 
 ## Benchmarks
 
