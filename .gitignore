@@ -5,3 +5,4 @@ data/
 *.egg-info
 # magic environments
 .magic
+x.mojo

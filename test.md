@@ -3,6 +3,7 @@
 To perform tests on the ported Mojo code, execute the following command:
 
 ```bash
+magic shell
 mojo test_gpt2.mojo
 ```
 

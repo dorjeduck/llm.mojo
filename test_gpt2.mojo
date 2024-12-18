@@ -1,6 +1,9 @@
 from collections.vector import InlinedFixedVector
-from time import now
+from time import perf_counter_ns
 from sys import exit
+from sys.info import sizeof
+from memory import UnsafePointer
+from utils import StringRef
 
 from train_gpt2 import (
     GPT2,
@@ -24,7 +27,10 @@ alias SIZEOF_FLOAT = sizeof[DType.float32]()
 
 # poor man's tensor checker
 fn check_tensor(
-    inout a: DTypePointer[dtype], inout b: DTypePointer[dtype], n: Int, label: StringRef
+    inout a: UnsafePointer[SIMD[dtype, 1]],
+    inout b: UnsafePointer[SIMD[dtype, 1]],
+    n: Int,
+    label: StringRef,
 ) -> Bool:
     var print_upto: Int = 5
     var ok: Bool = True
@@ -62,12 +68,19 @@ fn check_tensor(
         print("TENSOR NOT OK, maxdif =", maxdiff)
     return ok
 
-fn read_to_dtype_pointer[T:DType](inout ptr:DTypePointer[T],file_handle:FileHandle,num:Int,alloc:Bool=False) raises -> None :
+
+fn read_to_dtype_pointer[
+    T: DType
+](
+    inout ptr: UnsafePointer[SIMD[T, 1]],
+    file_handle: FileHandle,
+    num: Int,
+    alloc: Bool = False,
+) raises -> None:
     if alloc:
-        ptr = DTypePointer[T].alloc(num)
-    _ = file_handle.read(ptr,num)
-    
-   
+        ptr = UnsafePointer[SIMD[T, 1]].alloc(num)
+    _ = file_handle.read(ptr, num)
+
 
 fn main() raises:
     # build the GPT-2 model from a checkpoint
@@ -80,23 +93,22 @@ fn main() raises:
 
     # load additional information that we will use for debugging and error checking
 
-    
     var state_file = open("gpt2_124M_debug_state.bin", "r")
-   
-    var state_header = DTypePointer[DType.int32].alloc(256)
-    read_to_dtype_pointer[DType.int32](state_header,state_file,256)
+
+    var state_header = UnsafePointer[SIMD[DType.int32, 1]].alloc(256)
+    read_to_dtype_pointer[DType.int32](state_header, state_file, 256)
 
     if state_header[0] != 20240327:
         print("Bad magic model file")
         exit(1)
     if state_header[1] != 2:
-        print("Bad version in model file:",state_header[1])
+        print("Bad version in model file:", state_header[1])
         exit(1)
 
-
-   
     var B: Int = int(state_header[2])  # batch size, e.g. 4
-    var T: Int = int(state_header[3])  # time / sequence length (e.g. 64, up to maxT)
+    var T: Int = int(
+        state_header[3]
+    )  # time / sequence length (e.g. 64, up to maxT)
 
     print("[State]")
     print("batch_size:", B)
@@ -109,20 +121,21 @@ fn main() raises:
 
     # inputs and expected outputs, only used for error checking
 
-    var x = DTypePointer[dtype_int]().alloc(B * T)
-    var y = DTypePointer[dtype_int]().alloc(B * T)
+    var x = UnsafePointer[SIMD[dtype_int,1]]().alloc(B * T)
+    var y = UnsafePointer[SIMD[dtype_int,1]]().alloc(B * T)
 
-    var expected_logits = DTypePointer[dtype]().alloc(B * T * V)
-    var expected_loss = DTypePointer[dtype]().alloc(1)
-   
+    var expected_logits = UnsafePointer[SIMD[dtype, 1]]().alloc(B * T * V)
+    var expected_loss = UnsafePointer[SIMD[dtype, 1]]().alloc(1)
+
     # read reference information from Python
 
-    read_to_dtype_pointer[DType.int32](x,state_file,B*T)
-    read_to_dtype_pointer[DType.int32](y,state_file,B*T)
-    read_to_dtype_pointer[DType.float32](expected_logits,state_file,B*T*V)
-    read_to_dtype_pointer[DType.float32](expected_loss,state_file,1)
-    read_to_dtype_pointer[DType.float32](expected_grads_memory,state_file,model.num_parameters)
-
+    read_to_dtype_pointer[DType.int32](x, state_file, B * T)
+    read_to_dtype_pointer[DType.int32](y, state_file, B * T)
+    read_to_dtype_pointer[DType.float32](expected_logits, state_file, B * T * V)
+    read_to_dtype_pointer[DType.float32](expected_loss, state_file, 1)
+    read_to_dtype_pointer[DType.float32](
+        expected_grads_memory, state_file, model.num_parameters
+    )
 
     state_file.close()
 
@@ -148,12 +161,12 @@ fn main() raises:
     )
 
     for step in range(10):
-        var start = now()
+        var start = perf_counter_ns()
         gpt2_forward(model, x, y, B, T)
         gpt2_zero_grad(model)
         gpt2_backward(model)
 
-        elapsed_time_ms = (now() - start) / 1_000_000
+        elapsed_time_ms = (perf_counter_ns() - start) / 1_000_000
         if step == 0:
             # error checking at step 0 for reference activations/gradients
 
@@ -205,10 +218,16 @@ fn main() raises:
                 model.grads.qkvb, expected_grads.qkvb, L * 3 * C, "dqkvb"
             )
             gradoks[6] = check_tensor(
-                model.grads.attprojw, expected_grads.attprojw, L * C * C, "dattprojw"
+                model.grads.attprojw,
+                expected_grads.attprojw,
+                L * C * C,
+                "dattprojw",
             )
             gradoks[7] = check_tensor(
-                model.grads.attprojb, expected_grads.attprojb, L * C, "dattprojb"
+                model.grads.attprojb,
+                expected_grads.attprojb,
+                L * C,
+                "dattprojb",
             )
             gradoks[8] = check_tensor(
                 model.grads.ln2w, expected_grads.ln2w, L * C, "dln2w"
@@ -223,7 +242,10 @@ fn main() raises:
                 model.grads.fcb, expected_grads.fcb, L * 4 * C, "dfcb"
             )
             gradoks[12] = check_tensor(
-                model.grads.fcprojw, expected_grads.fcprojw, L * C * 4 * C, "dfcprojw"
+                model.grads.fcprojw,
+                expected_grads.fcprojw,
+                L * C * 4 * C,
+                "dfcprojw",
             )
             gradoks[13] = check_tensor(
                 model.grads.fcprojb, expected_grads.fcprojb, L * C, "dfcprojb"
@@ -242,7 +264,7 @@ fn main() raises:
 
         var expected_loss = expected_losses[step]
         var actual_loss = model.mean_loss
-        var step_loss_ok = abs(expected_loss - actual_loss) < 1e-2;
+        var step_loss_ok = abs(expected_loss - actual_loss) < 1e-2
         allok = allok and step_loss_ok
 
         # prvar the:Int timing information at the end

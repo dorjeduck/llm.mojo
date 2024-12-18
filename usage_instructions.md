@@ -39,7 +39,7 @@ Ensure that the `Magic` command line tool is installed by following the [Modular
 Train your model by running:
 
  ```bash
-magic shell -e mojo-24-4
+magic shell
 mojo train_gpt2.mojo
  ```
 

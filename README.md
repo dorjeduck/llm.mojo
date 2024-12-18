@@ -2,19 +2,12 @@
 
 This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/llm.c) to [Mojo](https://docs.modular.com/mojo), currently in beta. Visit [llm.c](https://github.com/karpathy/llm.c) for a detailed explanation of the original project.
 
-Please note that this repository has not yet been updated to Mojo version 24.5 due to an issue that remains unresolved in the stable release: [parallelize won't work with local variables](https://github.com/modularml/mojo/issues/3483). This issue is addressed in the nightly release, but not in the stable version of Mojo 24.5.
-
-## Implementation
-
-- **train_gpt2_basic.mojo**: Basic port of train_gpt2.c to Mojo, which does not leverage Mojo's capabilities. Beyond the initial commit, we will not provide further updates for the 'train_gpt2_basic' version, except for necessary bug fixes.
-- **train_gpt2.mojo**: Enhanced version utilizing Mojo's performance gems like vectorization and parallelization. Work in progress.
-
 ## Prerequisite
 
 Before using llm.🔥 for the first time, please run the following preparatory commands:
   
 ```bash
-pip install -r requirements
+pip install -r requirements.txt
 python prepro_tinyshakespeare.py  
 python train_gpt2.py
 ```
@@ -24,22 +17,11 @@ python train_gpt2.py
 - Ensure that the [Magic](https://docs.modular.com/max/tutorials/magic) command line tool is installed by following the [Modular Docs](https://docs.modular.com/magic).
 
 ```bash
-magic shell -e mojo-24-4
+magic shell
 mojo train_gpt2.mojo
 ```
 
 For a more detailed step-by-step guide including additional setup details and options, please refer to our [detailed usage instructions](./usage_instructions.md).
-
-### Mojo 24.5 nightly
-
-A initial version for the nightly release of Mojo 24.5 is now available for testing:
-
-```bash
-magic shell -e nightly
-mojo train_gpt2_nightly.mojo
-```
-
-Please note that the nightly releases are often subject to breaking changes, so you may encounter issues when running ```train_gpt2_nightly.mojo```.
 
 ## Benchmarks
 
@@ -55,7 +37,6 @@ Basic benchmark results: (M2 MacBook Pro)
 | train_gpt2.mojo            | 1819 ms                    |
 | train_gpt2.c (with OpenMP) | 1849 ms                    |
 | train_gpt2.c (no OpenMP)   | 7473 ms                    |
-| train_gpt2_basic.mojo      | 54509 ms                   |
 
 !['Training Loop Times'](imgs/training_loop_times_chart.png)
 
@@ -69,6 +50,8 @@ At this stage, there are no plans for further development of this app, except fo
   
 ## Changelog
 
+- 2024.12.17
+  - Update to Mojo 24.6
 - 2024.09.27
   - Experimental Mojo 24.5 nightly version
 - 2024.09.24
