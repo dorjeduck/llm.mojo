@@ -4,7 +4,7 @@ This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/
 
 ## ⚠️ Note
 
- This project is based on Mojo 24.6 and has not been updated to support the new Pixi-based setup (the previously used magic tool we used is now deprecated — see [Modular Docs](https://docs.modular.com/magic/)). Mojo has also gone through breaking changes since, so the code is not compatible with the current version. Right now, active development is paused, but I hope to update the project once Mojo’s APIs and tooling have stabilized.
+ This project is based on Mojo 24.6 and has not been updated to support the new Pixi-based setup (the previously used magic tool we used is now deprecated — see [Modular Docs](https://docs.modular.com/magic/)). Mojo has also gone through breaking changes since, so the code is not compatible with the current version. Right now, active development is paused, but I hope to update the project once Mojo has stabilized.
 
 ## Prerequisite
 
