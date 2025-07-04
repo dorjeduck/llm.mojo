@@ -2,6 +2,10 @@
 
 This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/llm.c) to [Mojo](https://docs.modular.com/mojo), currently in beta. Visit [llm.c](https://github.com/karpathy/llm.c) for a detailed explanation of the original project.
 
+## ⚠️ Note
+
+ This project is based on Mojo 24.6 and has not been updated to support the new Pixi-based setup (the previously used magic tool we used is now deprecated — see [Modular Docs](https://docs.modular.com/magic/)). Mojo has also gone through breaking changes since, so the code is not compatible with the current version. Right now, active development is paused, but I hope to update the project once Mojo’s APIs and tooling have stabilized.
+
 ## Prerequisite
 
 Before using llm.🔥 for the first time, please run the following preparatory commands:
@@ -46,7 +50,7 @@ We ported `test_gpt2.c` from the original repository to Mojo to validate our por
 
 ## Development Roadmap
 
-At this stage, there are no plans for further development of this app, except for keeping up with Mojo's latest versions. It primarily serves as a proof of concept, showcasing Mojo's ability to implement C-like applications in terms of speed and low-level programming. That said, I’m always open to new ideas or collaboration opportunities, so feel free to reach out to discuss ideas.
+At this stage, there are no plans for further development of this app. It primarily serves as a proof of concept, showcasing Mojo's ability to implement C-like applications in terms of speed and low-level programming. That said, I’m always open to new ideas or collaboration opportunities, so feel free to reach out to discuss ideas.
   
 ## Changelog
 
