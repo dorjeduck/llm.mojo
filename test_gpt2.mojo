@@ -1,9 +1,9 @@
-from collections.vector import InlinedFixedVector
+from collections import InlineArray
 from time import perf_counter_ns
 from sys import exit
 from sys.info import sizeof
-from memory import UnsafePointer
-from utils import StringRef
+from memory import UnsafePointer, memcpy
+
 
 from train_gpt2 import (
     GPT2,
@@ -27,10 +27,10 @@ alias SIZEOF_FLOAT = sizeof[DType.float32]()
 
 # poor man's tensor checker
 fn check_tensor(
-    inout a: UnsafePointer[SIMD[dtype, 1]],
-    inout b: UnsafePointer[SIMD[dtype, 1]],
+    mut a: UnsafePointer[SIMD[dtype, 1]],
+    mut b: UnsafePointer[SIMD[dtype, 1]],
     n: Int,
-    label: StringRef,
+    label: String,
 ) -> Bool:
     var print_upto: Int = 5
     var ok: Bool = True
@@ -72,14 +72,12 @@ fn check_tensor(
 fn read_to_dtype_pointer[
     T: DType
 ](
-    inout ptr: UnsafePointer[SIMD[T, 1]],
-    file_handle: FileHandle,
-    num: Int,
-    alloc: Bool = False,
+    ptr: UnsafePointer[Scalar[T]], file_handle: FileHandle, size: Int
 ) raises -> None:
-    if alloc:
-        ptr = UnsafePointer[SIMD[T, 1]].alloc(num)
-    _ = file_handle.read(ptr, num)
+    # Read directly into the pointer using read_bytes
+    var bytes_to_read = size * sizeof[Scalar[T]]()
+    var bytes_data = file_handle.read_bytes(bytes_to_read)
+    memcpy(ptr.bitcast[UInt8](), bytes_data.unsafe_ptr(), bytes_to_read)
 
 
 fn main() raises:
@@ -105,8 +103,8 @@ fn main() raises:
         print("Bad version in model file:", state_header[1])
         exit(1)
 
-    var B: Int = int(state_header[2])  # batch size, e.g. 4
-    var T: Int = int(
+    var B: Int = Int(state_header[2])  # batch size, e.g. 4
+    var T: Int = Int(
         state_header[3]
     )  # time / sequence length (e.g. 64, up to maxT)
 
@@ -121,8 +119,8 @@ fn main() raises:
 
     # inputs and expected outputs, only used for error checking
 
-    var x = UnsafePointer[SIMD[dtype_int,1]]().alloc(B * T)
-    var y = UnsafePointer[SIMD[dtype_int,1]]().alloc(B * T)
+    var x = UnsafePointer[SIMD[dtype_int, 1]]().alloc(B * T)
+    var y = UnsafePointer[SIMD[dtype_int, 1]]().alloc(B * T)
 
     var expected_logits = UnsafePointer[SIMD[dtype, 1]]().alloc(B * T * V)
     var expected_loss = UnsafePointer[SIMD[dtype, 1]]().alloc(1)
@@ -179,7 +177,7 @@ fn main() raises:
                     print(expected_logits[i], model.acts.logits[i])
 
                 if abs(expected_logits[i] - model.acts.logits[i]) >= 1e-2:
-                    print("MISMATCH AT INDEX " + str(i) + ":")
+                    print("MISMATCH AT INDEX " + String(i) + ":")
                     print(expected_logits[i], model.acts.logits[i])
                     logits_ok = False
                     break
@@ -197,7 +195,7 @@ fn main() raises:
                 print("LOSS OK:", model.mean_loss, expected_loss[0])
 
             # finally check all the gradients
-            var gradoks = InlinedFixedVector[Bool, 16](16)
+            var gradoks = InlineArray[Bool, 16](fill=False)
 
             gradoks[0] = check_tensor(
                 model.grads.wte, expected_grads.wte, V * C, "dwte"
@@ -271,13 +269,13 @@ fn main() raises:
 
         print(
             "step "
-            + str(step)
+            + String(step)
             + ": loss "
-            + str(model.mean_loss)
+            + String(model.mean_loss)
             + " (took "
-            + str(elapsed_time_ms)
+            + String(elapsed_time_ms)
             + " ms) OK = "
-            + str(step_loss_ok)
+            + String(step_loss_ok)
         )
 
     print("overall okay:", allok)

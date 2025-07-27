@@ -2,9 +2,7 @@
 
 This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/llm.c) to [Mojo](https://docs.modular.com/mojo), currently in beta. Visit [llm.c](https://github.com/karpathy/llm.c) for a detailed explanation of the original project.
 
-## ⚠️ Note
-
- This project is based on Mojo 24.6 and has not been updated to support the new Pixi-based setup (the previously used magic tool we used is now deprecated — see [Modular Docs](https://docs.modular.com/magic/)). Mojo has also gone through breaking changes since, so the code is not compatible with the current version. Right now, active development is paused, but I hope to update the project once Mojo has stabilized.
+> **Note**: This project is based on the stable Mojo 25.4 release.
 
 ## Prerequisite
 
@@ -18,12 +16,24 @@ python train_gpt2.py
 
 ## How to use
 
-- Ensure that the [Magic](https://docs.modular.com/max/tutorials/magic) command line tool is installed by following the [Modular Docs](https://docs.modular.com/magic).
+### Step 1: Install Pixi
+
+If you don't have it, install [pixi](https://pixi.sh/latest/):
 
 ```bash
-magic shell
+curl -fsSL https://pixi.sh/install.sh | sh
+```
+
+### Step 2: Run the training program
+
+Start the virtual environment and execute the training program:
+
+```bash
+pixi shell
 mojo train_gpt2.mojo
 ```
+
+> **Note**: The first time you run `pixi shell`, it will automatically install all necessary dependencies defined in `pixi.toml`.
 
 For a more detailed step-by-step guide including additional setup details and options, please refer to our [detailed usage instructions](./usage_instructions.md).
 
@@ -54,6 +64,8 @@ At this stage, there are no plans for further development of this app. It primar
   
 ## Changelog
 
+- 2025.07.27
+  - Update to Mojo 25.4
 - 2024.12.17
   - Update to Mojo 24.6
 - 2024.09.27

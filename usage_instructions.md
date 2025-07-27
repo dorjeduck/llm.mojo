@@ -34,13 +34,19 @@ python train_gpt2.py
 
 ### Step 4: Train the Model
 
-Ensure that the `Magic` command line tool is installed by following the [Modular Docs](https://docs.modular.com/magic).
+Ensure that `pixi` is installed by following the [Pixi installation guide](https://pixi.sh/latest/):
+
+```bash
+curl -fsSL https://pixi.sh/install.sh | sh
+```
 
 Train your model by running:
 
- ```bash
-magic shell
+```bash
+pixi shell
 mojo train_gpt2.mojo
- ```
+```
+
+This command initiates the training process using the prepared data. When you execute the `pixi shell` command for the first time, it will automatically install all necessary dependencies defined in `pixi.toml`.
 
 This command initiates the training process using the prepared data. When you execute the magic command for the first time, it will automatically install all necessary dependencies.

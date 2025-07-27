@@ -1,13 +1,11 @@
 from algorithm import vectorize, parallelize
-from collections.vector import InlinedFixedVector
+from collections import InlineArray
 from math import sqrt, exp, tanh, cosh, log
 from memory import UnsafePointer, memset, memset_zero, memcpy
 from python import Python
 from sys import exit
 from sys.info import is_apple_silicon, simdwidthof, sizeof
 from time import perf_counter_ns
-from utils import StringRef
-from buffer import Buffer
 
 
 fn get_simd_width() -> Int:
@@ -47,7 +45,7 @@ alias UNROLL_FACTOR = 4
 
 
 fn encoder_forward(
-    out: UnsafePointer[Scalar[dtype]],
+    vout: UnsafePointer[Scalar[dtype]],
     inp: UnsafePointer[Scalar[dtype_int]],
     wte: UnsafePointer[Scalar[dtype]],
     wpe: UnsafePointer[Scalar[dtype]],
@@ -59,11 +57,11 @@ fn encoder_forward(
     fn _calc(b: Int):
         for t in range(T):
             # seek to the output position in out[b,t,:]
-            var out_bt: UnsafePointer[Scalar[dtype]] = out + b * T * C + t * C
+            var out_bt: UnsafePointer[Scalar[dtype]] = vout + b * T * C + t * C
             # get the index of the token at inp[b, t]
             var ix = inp[b * T + t]
             # seek to the position in wte corresponding to the token
-            var wte_ix: UnsafePointer[Scalar[dtype]] = wte + int(ix) * C
+            var wte_ix: UnsafePointer[Scalar[dtype]] = wte + Int(ix) * C
             # seek to the position in wpe corresponding to the position
             var wpe_t: UnsafePointer[Scalar[dtype]] = wpe + t * C
             # add the two vectors and store the result in out[b,t,:]
@@ -94,7 +92,7 @@ fn encoder_backward(
         for t in range(T):
             var dout_bt: UnsafePointer[Scalar[dtype]] = dout + b * T * C + t * C
             var ix = inp[b * T + t]
-            var dwte_ix: UnsafePointer[Scalar[dtype]] = dwte + int(ix) * C
+            var dwte_ix: UnsafePointer[Scalar[dtype]] = dwte + Int(ix) * C
             var dwpe_t: UnsafePointer[Scalar[dtype]] = dwpe + t * C
 
             @parameter
@@ -109,7 +107,7 @@ fn encoder_backward(
 
 
 fn layernorm_forward(
-    out: UnsafePointer[Scalar[dtype]],
+    vout: UnsafePointer[Scalar[dtype]],
     mean: UnsafePointer[Scalar[dtype]],
     rstd: UnsafePointer[Scalar[dtype]],
     inp: UnsafePointer[Scalar[dtype]],
@@ -153,7 +151,7 @@ fn layernorm_forward(
             var s: FLOAT = FLOAT(1.0) / sqrt(v + eps)
 
             # seek to the output position in out[b,t,:]
-            var out_bt: UnsafePointer[Scalar[dtype]] = out + b * T * C + t * C
+            var out_bt: UnsafePointer[Scalar[dtype]] = vout + b * T * C + t * C
 
             @parameter
             fn _op3[width: Int](iv: Int):
@@ -250,7 +248,7 @@ fn layernorm_backward(
 
 
 fn matmul_forward(
-    out: UnsafePointer[Scalar[dtype]],
+    vout: UnsafePointer[Scalar[dtype]],
     inp: UnsafePointer[Scalar[dtype]],
     weight: UnsafePointer[Scalar[dtype]],
     bias: UnsafePointer[Scalar[dtype]],
@@ -268,7 +266,9 @@ fn matmul_forward(
     @parameter
     fn _calc(b: Int):
         for t in range(T):
-            var out_bt: UnsafePointer[Scalar[dtype]] = out + b * T * OC + t * OC
+            var out_bt: UnsafePointer[Scalar[dtype]] = (
+                vout + b * T * OC + t * OC
+            )
             var inp_bt: UnsafePointer[Scalar[dtype]] = inp + b * T * C + t * C
 
             for o in range(OC):
@@ -313,9 +313,9 @@ fn matmul_backward(
     @parameter
     fn _calc(b: Int):
         for t in range(T):
-            var dout_bt: UnsafePointer[
-                Scalar[dtype]
-            ] = dout + b * T * OC + t * OC
+            var dout_bt: UnsafePointer[Scalar[dtype]] = (
+                dout + b * T * OC + t * OC
+            )
             var dinp_bt: UnsafePointer[Scalar[dtype]] = dinp + b * T * C + t * C
             for o in range(OC):
                 var wrow: UnsafePointer[Scalar[dtype]] = weight + o * C
@@ -339,12 +339,12 @@ fn matmul_backward(
     fn _calc2(o: Int):
         for b in range(B):
             for t in range(T):
-                var dout_bt: UnsafePointer[
-                    Scalar[dtype]
-                ] = dout + b * T * OC + t * OC
-                var inp_bt: UnsafePointer[
-                    Scalar[dtype]
-                ] = inp + b * T * C + t * C
+                var dout_bt: UnsafePointer[Scalar[dtype]] = (
+                    dout + b * T * OC + t * OC
+                )
+                var inp_bt: UnsafePointer[Scalar[dtype]] = (
+                    inp + b * T * C + t * C
+                )
                 var dwrow: UnsafePointer[Scalar[dtype]] = dweight + o * C
                 var d: FLOAT = dout_bt[o]
                 if dbias != NULL:
@@ -364,7 +364,7 @@ fn matmul_backward(
 
 
 fn attention_forward(
-    out: UnsafePointer[Scalar[dtype]],
+    vout: UnsafePointer[Scalar[dtype]],
     preatt: UnsafePointer[Scalar[dtype]],
     att: UnsafePointer[Scalar[dtype]],
     inp: UnsafePointer[Scalar[dtype]],
@@ -386,23 +386,23 @@ fn attention_forward(
         # for b in range(B):
         for t in range(T):
             for h in range(NH):
-                var query_t: UnsafePointer[
-                    Scalar[dtype]
-                ] = inp + b * T * C3 + t * C3 + h * hs
-                var preatt_bth: UnsafePointer[
-                    Scalar[dtype]
-                ] = preatt + b * NH * T * T + h * T * T + t * T
-                var att_bth: UnsafePointer[
-                    Scalar[dtype]
-                ] = att + b * NH * T * T + h * T * T + t * T
+                var query_t: UnsafePointer[Scalar[dtype]] = (
+                    inp + b * T * C3 + t * C3 + h * hs
+                )
+                var preatt_bth: UnsafePointer[Scalar[dtype]] = (
+                    preatt + b * NH * T * T + h * T * T + t * T
+                )
+                var att_bth: UnsafePointer[Scalar[dtype]] = (
+                    att + b * NH * T * T + h * T * T + t * T
+                )
 
                 # pass 1: calculate query dot key and maxval
                 var maxval: FLOAT = -10000.0  # TODO something better
 
                 for t2 in range(t + 1):
-                    var key_t2: UnsafePointer[
-                        Scalar[dtype]
-                    ] = inp + b * T * C3 + t2 * C3 + h * hs + C  # +C because it's key
+                    var key_t2: UnsafePointer[Scalar[dtype]] = (
+                        inp + b * T * C3 + t2 * C3 + h * hs + C
+                    )  # +C because it's key
 
                     # (query_t) dot (key_t2)
                     var val: FLOAT = 0.0
@@ -455,15 +455,17 @@ fn attention_forward(
                 memset_zero(att_bth + t + 1, T - t - 1)
 
                 # pass 4: accumulate weighted values into the output of attention
-                var out_bth: UnsafePointer[
-                    Scalar[dtype]
-                ] = out + b * T * C + t * C + h * hs
+                var out_bth: UnsafePointer[Scalar[dtype]] = (
+                    vout + b * T * C + t * C + h * hs
+                )
                 # for i in range(hs):
                 #    out_bth[i] = 0.0
                 memset_zero(out_bth, hs)
 
                 for t2 in range(t + 1):
-                    var value_t2 = inp + b * T * C3 + t2 * C3 + h * hs + C * 2  # +C*2 because it's value
+                    var value_t2 = (
+                        inp + b * T * C3 + t2 * C3 + h * hs + C * 2
+                    )  # +C*2 because it's value
                     var att_btht2: FLOAT = att_bth[t2]
 
                     @parameter
@@ -504,33 +506,33 @@ fn attention_backward(
     fn _calc(b: Int):
         for t in range(T):
             for h in range(NH):
-                var att_bth: UnsafePointer[
-                    Scalar[dtype]
-                ] = att + b * NH * T * T + h * T * T + t * T
-                var datt_bth: UnsafePointer[
-                    Scalar[dtype]
-                ] = datt + b * NH * T * T + h * T * T + t * T
-                var dpreatt_bth: UnsafePointer[
-                    Scalar[dtype]
-                ] = dpreatt + b * NH * T * T + h * T * T + t * T
-                var dquery_t: UnsafePointer[
-                    Scalar[dtype]
-                ] = dinp + b * T * C3 + t * C3 + h * hs
-                var query_t: UnsafePointer[
-                    Scalar[dtype]
-                ] = inp + b * T * C3 + t * C3 + h * hs
+                var att_bth: UnsafePointer[Scalar[dtype]] = (
+                    att + b * NH * T * T + h * T * T + t * T
+                )
+                var datt_bth: UnsafePointer[Scalar[dtype]] = (
+                    datt + b * NH * T * T + h * T * T + t * T
+                )
+                var dpreatt_bth: UnsafePointer[Scalar[dtype]] = (
+                    dpreatt + b * NH * T * T + h * T * T + t * T
+                )
+                var dquery_t: UnsafePointer[Scalar[dtype]] = (
+                    dinp + b * T * C3 + t * C3 + h * hs
+                )
+                var query_t: UnsafePointer[Scalar[dtype]] = (
+                    inp + b * T * C3 + t * C3 + h * hs
+                )
 
                 # backward pass 4, through the value accumulation
-                var dout_bth: UnsafePointer[
-                    Scalar[dtype]
-                ] = dout + b * T * C + t * C + h * hs
+                var dout_bth: UnsafePointer[Scalar[dtype]] = (
+                    dout + b * T * C + t * C + h * hs
+                )
                 for t2 in range(t + 1):
-                    var value_t2: UnsafePointer[
-                        Scalar[dtype]
-                    ] = inp + b * T * C3 + t2 * C3 + h * hs + C * 2  # +C*2 because it's value
-                    var dvalue_t2: UnsafePointer[
-                        Scalar[dtype]
-                    ] = dinp + b * T * C3 + t2 * C3 + h * hs + C * 2
+                    var value_t2: UnsafePointer[Scalar[dtype]] = (
+                        inp + b * T * C3 + t2 * C3 + h * hs + C * 2
+                    )  # +C*2 because it's value
+                    var dvalue_t2: UnsafePointer[Scalar[dtype]] = (
+                        dinp + b * T * C3 + t2 * C3 + h * hs + C * 2
+                    )
 
                     @parameter
                     fn _op[width: Int](iv: Int):
@@ -574,12 +576,12 @@ fn attention_backward(
 
                 # backward pass 1, the query @ key matmul
                 for t2 in range(t + 1):
-                    var key_t2: UnsafePointer[
-                        Scalar[dtype]
-                    ] = inp + b * T * C3 + t2 * C3 + h * hs + C  # +C because it's key
-                    var dkey_t2: UnsafePointer[
-                        Scalar[dtype]
-                    ] = dinp + b * T * C3 + t2 * C3 + h * hs + C  # +C because it's key
+                    var key_t2: UnsafePointer[Scalar[dtype]] = (
+                        inp + b * T * C3 + t2 * C3 + h * hs + C
+                    )  # +C because it's key
+                    var dkey_t2: UnsafePointer[Scalar[dtype]] = (
+                        dinp + b * T * C3 + t2 * C3 + h * hs + C
+                    )  # +C because it's key
 
                     @parameter
                     fn _op2[width: Int](iv: Int):
@@ -610,7 +612,9 @@ fn attention_backward(
 
 
 fn gelu_forward(
-    out: UnsafePointer[Scalar[dtype]], inp: UnsafePointer[Scalar[dtype]], N: Int
+    vout: UnsafePointer[Scalar[dtype]],
+    inp: UnsafePointer[Scalar[dtype]],
+    N: Int,
 ):
     var s: FLOAT = sqrt(2.0 / M_PI)
 
@@ -624,7 +628,7 @@ fn gelu_forward(
 
             var x = inp.load[width=width](iv)
             var cube = 0.044715 * pow(x, 3)
-            out.store(iv, 0.5 * x * (1.0 + tanh(s * (x + cube))))
+            vout.store(iv, 0.5 * x * (1.0 + tanh(s * (x + cube))))
 
         vectorize[_op, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](num_vectorize)
 
@@ -667,7 +671,7 @@ fn gelu_backward(
 
 
 fn residual_forward(
-    out: UnsafePointer[Scalar[dtype]],
+    vout: UnsafePointer[Scalar[dtype]],
     inp1: UnsafePointer[Scalar[dtype]],
     inp2: UnsafePointer[Scalar[dtype]],
     N: Int,
@@ -679,7 +683,7 @@ fn residual_forward(
         @parameter
         fn _op[width: Int](_iv: Int):
             var iv = ip * num_vectorize + _iv
-            out.store(
+            vout.store(
                 iv, inp1.load[width=width](iv) + inp2.load[width=width](iv)
             )  # scale and shift it
 
@@ -732,12 +736,12 @@ fn softmax_forward(
         # for b in range(B):
         for t in range(T):
             # probs <- softmax(logits)
-            var logits_bt: UnsafePointer[
-                Scalar[dtype]
-            ] = logits + b * T * Vp + t * Vp
-            var probs_bt: UnsafePointer[
-                Scalar[dtype]
-            ] = probs + b * T * Vp + t * Vp
+            var logits_bt: UnsafePointer[Scalar[dtype]] = (
+                logits + b * T * Vp + t * Vp
+            )
+            var probs_bt: UnsafePointer[Scalar[dtype]] = (
+                probs + b * T * Vp + t * Vp
+            )
 
             var maxval: FLOAT = -10000.0  # TODO something better
             for i in range(V):
@@ -787,9 +791,9 @@ fn crossentropy_forward(
     fn _calc(b: Int):
         for t in range(T):  # todo
             # loss = -log(probs[target])
-            var probs_bt: UnsafePointer[
-                Scalar[dtype]
-            ] = probs + b * T * Vp + t * Vp
+            var probs_bt: UnsafePointer[Scalar[dtype]] = (
+                probs + b * T * Vp + t * Vp
+            )
             var ix = targets[b * T + t]
             losses[b * T + t] = -log(probs_bt.load(ix))
 
@@ -811,12 +815,12 @@ fn crossentropy_softmax_backward(
     @parameter
     fn _calc(b: Int):
         for t in range(T):
-            var dlogits_bt: UnsafePointer[
-                Scalar[dtype]
-            ] = dlogits + b * T * Vp + t * Vp
-            var probs_bt: UnsafePointer[
-                Scalar[dtype]
-            ] = probs + b * T * Vp + t * Vp
+            var dlogits_bt: UnsafePointer[Scalar[dtype]] = (
+                dlogits + b * T * Vp + t * Vp
+            )
+            var probs_bt: UnsafePointer[Scalar[dtype]] = (
+                probs + b * T * Vp + t * Vp
+            )
             var dloss: FLOAT = dlosses[b * T + t]
             var ix = targets[b * T + t]
 
@@ -886,7 +890,7 @@ struct ParameterTensors:
 
     fn alloc_and_point_parameters(
         mut self,
-        param_sizes: InlinedFixedVector[type=Int, size=NUM_PARAMETER_TENSORS],
+        param_sizes: InlineArray[Int, NUM_PARAMETER_TENSORS],
     ) -> UnsafePointer[Scalar[dtype]]:
         var num_parameters: Int = 0
 
@@ -899,23 +903,23 @@ struct ParameterTensors:
         )
         # assign all the tensors
 
-        var ptrs = List(
-            UnsafePointer.address_of(self.wte),
-            UnsafePointer.address_of(self.wpe),
-            UnsafePointer.address_of(self.ln1w),
-            UnsafePointer.address_of(self.ln1b),
-            UnsafePointer.address_of(self.qkvw),
-            UnsafePointer.address_of(self.qkvb),
-            UnsafePointer.address_of(self.attprojw),
-            UnsafePointer.address_of(self.attprojb),
-            UnsafePointer.address_of(self.ln2w),
-            UnsafePointer.address_of(self.ln2b),
-            UnsafePointer.address_of(self.fcw),
-            UnsafePointer.address_of(self.fcb),
-            UnsafePointer.address_of(self.fcprojw),
-            UnsafePointer.address_of(self.fcprojb),
-            UnsafePointer.address_of(self.lnfw),
-            UnsafePointer.address_of(self.lnfb),
+        var ptrs = List[UnsafePointer[UnsafePointer[Scalar[dtype]]]](
+            UnsafePointer(to=self.wte),
+            UnsafePointer(to=self.wpe),
+            UnsafePointer(to=self.ln1w),
+            UnsafePointer(to=self.ln1b),
+            UnsafePointer(to=self.qkvw),
+            UnsafePointer(to=self.qkvb),
+            UnsafePointer(to=self.attprojw),
+            UnsafePointer(to=self.attprojb),
+            UnsafePointer(to=self.ln2w),
+            UnsafePointer(to=self.ln2b),
+            UnsafePointer(to=self.fcw),
+            UnsafePointer(to=self.fcb),
+            UnsafePointer(to=self.fcprojw),
+            UnsafePointer(to=self.fcprojb),
+            UnsafePointer(to=self.lnfw),
+            UnsafePointer(to=self.lnfb),
         )
 
         var params_memory_iterator: UnsafePointer[
@@ -986,33 +990,33 @@ struct ActivationTensors:
         self.losses = UnsafePointer[Scalar[dtype]]()
 
     fn alloc_and_point_activations(
-        mut self,
-        act_sizes: InlinedFixedVector[type=Int, size=NUM_ACTIVATION_TENSORS],
+        self,
+        act_sizes: InlineArray[Int, NUM_ACTIVATION_TENSORS],
     ) -> UnsafePointer[Scalar[dtype]]:
-        var ptrs = List(
-            UnsafePointer.address_of(self.encoded),
-            UnsafePointer.address_of(self.ln1),
-            UnsafePointer.address_of(self.ln1_mean),
-            UnsafePointer.address_of(self.ln1_rstd),
-            UnsafePointer.address_of(self.qkv),
-            UnsafePointer.address_of(self.atty),
-            UnsafePointer.address_of(self.preatt),
-            UnsafePointer.address_of(self.att),
-            UnsafePointer.address_of(self.attproj),
-            UnsafePointer.address_of(self.residual2),
-            UnsafePointer.address_of(self.ln2),
-            UnsafePointer.address_of(self.ln2_mean),
-            UnsafePointer.address_of(self.ln2_rstd),
-            UnsafePointer.address_of(self.fch),
-            UnsafePointer.address_of(self.fch_gelu),
-            UnsafePointer.address_of(self.fcproj),
-            UnsafePointer.address_of(self.residual3),
-            UnsafePointer.address_of(self.lnf),
-            UnsafePointer.address_of(self.lnf_mean),
-            UnsafePointer.address_of(self.lnf_rstd),
-            UnsafePointer.address_of(self.logits),
-            UnsafePointer.address_of(self.probs),
-            UnsafePointer.address_of(self.losses),
+        var ptrs = List[UnsafePointer[UnsafePointer[Scalar[dtype]]]](
+            UnsafePointer(to=self.encoded),
+            UnsafePointer(to=self.ln1),
+            UnsafePointer(to=self.ln1_mean),
+            UnsafePointer(to=self.ln1_rstd),
+            UnsafePointer(to=self.qkv),
+            UnsafePointer(to=self.atty),
+            UnsafePointer(to=self.preatt),
+            UnsafePointer(to=self.att),
+            UnsafePointer(to=self.attproj),
+            UnsafePointer(to=self.residual2),
+            UnsafePointer(to=self.ln2),
+            UnsafePointer(to=self.ln2_mean),
+            UnsafePointer(to=self.ln2_rstd),
+            UnsafePointer(to=self.fch),
+            UnsafePointer(to=self.fch_gelu),
+            UnsafePointer(to=self.fcproj),
+            UnsafePointer(to=self.residual3),
+            UnsafePointer(to=self.lnf),
+            UnsafePointer(to=self.lnf_mean),
+            UnsafePointer(to=self.lnf_rstd),
+            UnsafePointer(to=self.logits),
+            UnsafePointer(to=self.probs),
+            UnsafePointer(to=self.losses),
         )
 
         var num_activations: Int = 0
@@ -1044,7 +1048,7 @@ struct GPT2:
     var config: GPT2Config
     # the weights of the model, and their sizes
     var params: ParameterTensors
-    var param_sizes: InlinedFixedVector[type=Int, size=NUM_PARAMETER_TENSORS]
+    var param_sizes: InlineArray[Int, NUM_PARAMETER_TENSORS]
     var params_memory: UnsafePointer[Scalar[dtype]]
     var num_parameters: Int
     # gradients of the weights
@@ -1055,7 +1059,7 @@ struct GPT2:
     var v_memory: UnsafePointer[Scalar[dtype]]
     # the activations of the model, and their sizes
     var acts: ActivationTensors
-    var act_sizes: InlinedFixedVector[type=Int, size=NUM_ACTIVATION_TENSORS]
+    var act_sizes: InlineArray[Int, NUM_ACTIVATION_TENSORS]
     var acts_memory: UnsafePointer[Scalar[dtype]]
     var num_activations: Int
     # gradients of the activations
@@ -1071,22 +1075,18 @@ struct GPT2:
         Scalar[dtype_int]
     ]  # the target tokens for the current forward pass
     var mean_loss: FLOAT  # after a forward pass with targets, will be populated with the mean loss
-    var checkpoint_path: StringRef
+    var checkpoint_path: String
 
-    fn __init__(out self, checkpoint_path: StringRef) raises:
+    fn __init__(out self, checkpoint_path: String) raises:
         self.checkpoint_path = checkpoint_path
 
-        self.param_sizes = InlinedFixedVector[
-            type=Int, size=NUM_PARAMETER_TENSORS
-        ](NUM_PARAMETER_TENSORS)
-        self.act_sizes = InlinedFixedVector[
-            type=Int, size=NUM_ACTIVATION_TENSORS
-        ](NUM_ACTIVATION_TENSORS)
+        self.param_sizes = InlineArray[Int, NUM_PARAMETER_TENSORS](fill=0)
+        self.act_sizes = InlineArray[Int, NUM_ACTIVATION_TENSORS](fill=0)
 
-        var model_file = open(checkpoint_path, "r")
+        model_file = open(checkpoint_path, "r")
+        model_header = InlineArray[Int32, 256](fill=0)
 
-        var model_header = UnsafePointer[Scalar[dtype.int32]].alloc(256)
-        read_to_dtype_pointer[DType.int32](model_header, model_file, 256)
+        read_to_buf(model_header, model_file)
 
         if model_header[0] != 20240326:
             print("Bad magic model file", model_header[0])
@@ -1098,12 +1098,12 @@ struct GPT2:
         # read in hyperparameters
 
         self.config = GPT2Config(
-            int(model_header[2]),
-            int(model_header[3]),
-            int(model_header[4]),
-            int(model_header[5]),
-            int(model_header[6]),
-            int(model_header[7]),
+            Int(model_header[2]),
+            Int(model_header[3]),
+            Int(model_header[4]),
+            Int(model_header[5]),
+            Int(model_header[6]),
+            Int(model_header[7]),
         )
 
         var maxT: Int = self.config.max_seq_len
@@ -1274,74 +1274,74 @@ fn gpt2_forward(
         # get the pointers of the weights for this layer
         var l_ln1w: UnsafePointer[Scalar[dtype]] = model.params.ln1w + l * C
         var l_ln1b: UnsafePointer[Scalar[dtype]] = model.params.ln1b + l * C
-        var l_qkvw: UnsafePointer[
-            Scalar[dtype]
-        ] = model.params.qkvw + l * 3 * C * C
+        var l_qkvw: UnsafePointer[Scalar[dtype]] = (
+            model.params.qkvw + l * 3 * C * C
+        )
         var l_qkvb: UnsafePointer[Scalar[dtype]] = model.params.qkvb + l * 3 * C
-        var l_attprojw: UnsafePointer[
-            Scalar[dtype]
-        ] = model.params.attprojw + l * C * C
-        var l_attprojb: UnsafePointer[
-            Scalar[dtype]
-        ] = model.params.attprojb + l * C
+        var l_attprojw: UnsafePointer[Scalar[dtype]] = (
+            model.params.attprojw + l * C * C
+        )
+        var l_attprojb: UnsafePointer[Scalar[dtype]] = (
+            model.params.attprojb + l * C
+        )
         var l_ln2w: UnsafePointer[Scalar[dtype]] = model.params.ln2w + l * C
         var l_ln2b: UnsafePointer[Scalar[dtype]] = model.params.ln2b + l * C
-        var l_fcw: UnsafePointer[
-            Scalar[dtype]
-        ] = model.params.fcw + l * 4 * C * C
+        var l_fcw: UnsafePointer[Scalar[dtype]] = (
+            model.params.fcw + l * 4 * C * C
+        )
         var l_fcb: UnsafePointer[Scalar[dtype]] = model.params.fcb + l * 4 * C
-        var l_fcprojw: UnsafePointer[
-            Scalar[dtype]
-        ] = model.params.fcprojw + l * C * 4 * C
-        var l_fcprojb: UnsafePointer[
-            Scalar[dtype]
-        ] = model.params.fcprojb + l * C
+        var l_fcprojw: UnsafePointer[Scalar[dtype]] = (
+            model.params.fcprojw + l * C * 4 * C
+        )
+        var l_fcprojb: UnsafePointer[Scalar[dtype]] = (
+            model.params.fcprojb + l * C
+        )
 
         # get the pointers of the activations for this layer
         var l_ln1: UnsafePointer[Scalar[dtype]] = model.acts.ln1 + l * B * T * C
-        var l_ln1_mean: UnsafePointer[
-            Scalar[dtype]
-        ] = model.acts.ln1_mean + l * B * T
-        var l_ln1_rstd: UnsafePointer[
-            Scalar[dtype]
-        ] = model.acts.ln1_rstd + l * B * T
-        var l_qkv: UnsafePointer[
-            Scalar[dtype]
-        ] = model.acts.qkv + l * B * T * 3 * C
-        var l_atty: UnsafePointer[
-            Scalar[dtype]
-        ] = model.acts.atty + l * B * T * C
-        var l_preatt: UnsafePointer[
-            Scalar[dtype]
-        ] = model.acts.preatt + l * B * NH * T * T
-        var l_att: UnsafePointer[
-            Scalar[dtype]
-        ] = model.acts.att + l * B * NH * T * T
-        var l_attproj: UnsafePointer[
-            Scalar[dtype]
-        ] = model.acts.attproj + l * B * T * C
-        var l_residual2: UnsafePointer[
-            Scalar[dtype]
-        ] = model.acts.residual2 + l * B * T * C
+        var l_ln1_mean: UnsafePointer[Scalar[dtype]] = (
+            model.acts.ln1_mean + l * B * T
+        )
+        var l_ln1_rstd: UnsafePointer[Scalar[dtype]] = (
+            model.acts.ln1_rstd + l * B * T
+        )
+        var l_qkv: UnsafePointer[Scalar[dtype]] = (
+            model.acts.qkv + l * B * T * 3 * C
+        )
+        var l_atty: UnsafePointer[Scalar[dtype]] = (
+            model.acts.atty + l * B * T * C
+        )
+        var l_preatt: UnsafePointer[Scalar[dtype]] = (
+            model.acts.preatt + l * B * NH * T * T
+        )
+        var l_att: UnsafePointer[Scalar[dtype]] = (
+            model.acts.att + l * B * NH * T * T
+        )
+        var l_attproj: UnsafePointer[Scalar[dtype]] = (
+            model.acts.attproj + l * B * T * C
+        )
+        var l_residual2: UnsafePointer[Scalar[dtype]] = (
+            model.acts.residual2 + l * B * T * C
+        )
         var l_ln2: UnsafePointer[Scalar[dtype]] = model.acts.ln2 + l * B * T * C
-        var l_ln2_mean: UnsafePointer[
-            Scalar[dtype]
-        ] = model.acts.ln2_mean + l * B * T
-        var l_ln2_rstd: UnsafePointer[
-            Scalar[dtype]
-        ] = model.acts.ln2_rstd + l * B * T
-        var l_fch: UnsafePointer[
-            Scalar[dtype]
-        ] = model.acts.fch + l * B * T * 4 * C
-        var l_fch_gelu: UnsafePointer[
-            Scalar[dtype]
-        ] = model.acts.fch_gelu + l * B * T * 4 * C
-        var l_fcproj: UnsafePointer[
-            Scalar[dtype]
-        ] = model.acts.fcproj + l * B * T * C
-        var l_residual3: UnsafePointer[
-            Scalar[dtype]
-        ] = model.acts.residual3 + l * B * T * C
+        var l_ln2_mean: UnsafePointer[Scalar[dtype]] = (
+            model.acts.ln2_mean + l * B * T
+        )
+        var l_ln2_rstd: UnsafePointer[Scalar[dtype]] = (
+            model.acts.ln2_rstd + l * B * T
+        )
+        var l_fch: UnsafePointer[Scalar[dtype]] = (
+            model.acts.fch + l * B * T * 4 * C
+        )
+        var l_fch_gelu: UnsafePointer[Scalar[dtype]] = (
+            model.acts.fch_gelu + l * B * T * 4 * C
+        )
+        var l_fcproj: UnsafePointer[Scalar[dtype]] = (
+            model.acts.fcproj + l * B * T * C
+        )
+        var l_residual3: UnsafePointer[Scalar[dtype]] = (
+            model.acts.residual3 + l * B * T * C
+        )
 
         # now do the forward pass
 
@@ -1437,19 +1437,12 @@ fn gpt2_backward(mut model: GPT2):
 
     var dloss_mean: FLOAT = FLOAT(1.0) / (B * T)
 
-    """
-    @parameter  
-    fn _op[width: Int](iv: Int):
-        for i in range(width):
-            model.grads_acts.losses.store(iv + i, dloss_mean)
-    vectorize[_op, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR]((B * T))
-    """
-    """
-    buffer = Buffer(model.grads_acts.losses, B * T)
-    buffer.fill(dloss_mean)
-    """
+    # Fill the gradient losses with the mean loss value
+    @parameter
+    fn _fill_losses[width: Int](i: Int):
+        model.grads_acts.losses.store[width=width](i, dloss_mean)
 
-    Buffer(model.grads_acts.losses, B * T).fill(dloss_mean)
+    vectorize[_fill_losses, SIMD_WIDTH](B * T)
 
     crossentropy_softmax_backward(
         model.grads_acts.logits,
@@ -1473,12 +1466,12 @@ fn gpt2_backward(mut model: GPT2):
         C,
         Vp,
     )
-    var residual: UnsafePointer[Scalar[dtype]] = model.acts.residual3 + (
-        L - 1
-    ) * B * T * C  # last layer's residual
-    var dresidual: UnsafePointer[Scalar[dtype]] = model.grads_acts.residual3 + (
-        L - 1
-    ) * B * T * C  # write to last layer's residual
+    var residual: UnsafePointer[Scalar[dtype]] = (
+        model.acts.residual3 + (L - 1) * B * T * C
+    )  # last layer's residual
+    var dresidual: UnsafePointer[Scalar[dtype]] = (
+        model.grads_acts.residual3 + (L - 1) * B * T * C
+    )  # write to last layer's residual
     layernorm_backward(
         dresidual,
         model.grads.lnfw,
@@ -1502,114 +1495,114 @@ fn gpt2_backward(mut model: GPT2):
 
         # get the pointers of the weights for this layer
         var l_ln1w: UnsafePointer[Scalar[dtype]] = model.params.ln1w + l * C
-        var l_qkvw: UnsafePointer[
-            Scalar[dtype]
-        ] = model.params.qkvw + l * 3 * C * C
-        var l_attprojw: UnsafePointer[
-            Scalar[dtype]
-        ] = model.params.attprojw + l * C * C
+        var l_qkvw: UnsafePointer[Scalar[dtype]] = (
+            model.params.qkvw + l * 3 * C * C
+        )
+        var l_attprojw: UnsafePointer[Scalar[dtype]] = (
+            model.params.attprojw + l * C * C
+        )
         var l_ln2w: UnsafePointer[Scalar[dtype]] = model.params.ln2w + l * C
-        var l_fcw: UnsafePointer[
-            Scalar[dtype]
-        ] = model.params.fcw + l * 4 * C * C
-        var l_fcprojw: UnsafePointer[
-            Scalar[dtype]
-        ] = model.params.fcprojw + l * C * 4 * C
+        var l_fcw: UnsafePointer[Scalar[dtype]] = (
+            model.params.fcw + l * 4 * C * C
+        )
+        var l_fcprojw: UnsafePointer[Scalar[dtype]] = (
+            model.params.fcprojw + l * C * 4 * C
+        )
         # get the pointers of the gradients of the weights for this layer
         var dl_ln1w: UnsafePointer[Scalar[dtype]] = model.grads.ln1w + l * C
         var dl_ln1b: UnsafePointer[Scalar[dtype]] = model.grads.ln1b + l * C
-        var dl_qkvw: UnsafePointer[
-            Scalar[dtype]
-        ] = model.grads.qkvw + l * 3 * C * C
+        var dl_qkvw: UnsafePointer[Scalar[dtype]] = (
+            model.grads.qkvw + l * 3 * C * C
+        )
         var dl_qkvb: UnsafePointer[Scalar[dtype]] = model.grads.qkvb + l * 3 * C
-        var dl_attprojw: UnsafePointer[
-            Scalar[dtype]
-        ] = model.grads.attprojw + l * C * C
-        var dl_attprojb: UnsafePointer[
-            Scalar[dtype]
-        ] = model.grads.attprojb + l * C
+        var dl_attprojw: UnsafePointer[Scalar[dtype]] = (
+            model.grads.attprojw + l * C * C
+        )
+        var dl_attprojb: UnsafePointer[Scalar[dtype]] = (
+            model.grads.attprojb + l * C
+        )
         var dl_ln2w: UnsafePointer[Scalar[dtype]] = model.grads.ln2w + l * C
         var dl_ln2b: UnsafePointer[Scalar[dtype]] = model.grads.ln2b + l * C
-        var dl_fcw: UnsafePointer[
-            Scalar[dtype]
-        ] = model.grads.fcw + l * 4 * C * C
+        var dl_fcw: UnsafePointer[Scalar[dtype]] = (
+            model.grads.fcw + l * 4 * C * C
+        )
         var dl_fcb: UnsafePointer[Scalar[dtype]] = model.grads.fcb + l * 4 * C
-        var dl_fcprojw: UnsafePointer[
-            Scalar[dtype]
-        ] = model.grads.fcprojw + l * C * 4 * C
-        var dl_fcprojb: UnsafePointer[
-            Scalar[dtype]
-        ] = model.grads.fcprojb + l * C
+        var dl_fcprojw: UnsafePointer[Scalar[dtype]] = (
+            model.grads.fcprojw + l * C * 4 * C
+        )
+        var dl_fcprojb: UnsafePointer[Scalar[dtype]] = (
+            model.grads.fcprojb + l * C
+        )
         # get the pointers of the activations for this layer
         var l_ln1: UnsafePointer[Scalar[dtype]] = model.acts.ln1 + l * B * T * C
-        var l_ln1_mean: UnsafePointer[
-            Scalar[dtype]
-        ] = model.acts.ln1_mean + l * B * T
-        var l_ln1_rstd: UnsafePointer[
-            Scalar[dtype]
-        ] = model.acts.ln1_rstd + l * B * T
-        var l_qkv: UnsafePointer[
-            Scalar[dtype]
-        ] = model.acts.qkv + l * B * T * 3 * C
-        var l_atty: UnsafePointer[
-            Scalar[dtype]
-        ] = model.acts.atty + l * B * T * C
-        var l_att: UnsafePointer[
-            Scalar[dtype]
-        ] = model.acts.att + l * B * NH * T * T
-        var l_residual2: UnsafePointer[
-            Scalar[dtype]
-        ] = model.acts.residual2 + l * B * T * C
+        var l_ln1_mean: UnsafePointer[Scalar[dtype]] = (
+            model.acts.ln1_mean + l * B * T
+        )
+        var l_ln1_rstd: UnsafePointer[Scalar[dtype]] = (
+            model.acts.ln1_rstd + l * B * T
+        )
+        var l_qkv: UnsafePointer[Scalar[dtype]] = (
+            model.acts.qkv + l * B * T * 3 * C
+        )
+        var l_atty: UnsafePointer[Scalar[dtype]] = (
+            model.acts.atty + l * B * T * C
+        )
+        var l_att: UnsafePointer[Scalar[dtype]] = (
+            model.acts.att + l * B * NH * T * T
+        )
+        var l_residual2: UnsafePointer[Scalar[dtype]] = (
+            model.acts.residual2 + l * B * T * C
+        )
         var l_ln2: UnsafePointer[Scalar[dtype]] = model.acts.ln2 + l * B * T * C
-        var l_ln2_mean: UnsafePointer[
-            Scalar[dtype]
-        ] = model.acts.ln2_mean + l * B * T
-        var l_ln2_rstd: UnsafePointer[
-            Scalar[dtype]
-        ] = model.acts.ln2_rstd + l * B * T
-        var l_fch: UnsafePointer[
-            Scalar[dtype]
-        ] = model.acts.fch + l * B * T * 4 * C
-        var l_fch_gelu: UnsafePointer[
-            Scalar[dtype]
-        ] = model.acts.fch_gelu + l * B * T * 4 * C
+        var l_ln2_mean: UnsafePointer[Scalar[dtype]] = (
+            model.acts.ln2_mean + l * B * T
+        )
+        var l_ln2_rstd: UnsafePointer[Scalar[dtype]] = (
+            model.acts.ln2_rstd + l * B * T
+        )
+        var l_fch: UnsafePointer[Scalar[dtype]] = (
+            model.acts.fch + l * B * T * 4 * C
+        )
+        var l_fch_gelu: UnsafePointer[Scalar[dtype]] = (
+            model.acts.fch_gelu + l * B * T * 4 * C
+        )
         # get the pointers of the gradients of the activations for this layer
-        var dl_ln1: UnsafePointer[
-            Scalar[dtype]
-        ] = model.grads_acts.ln1 + l * B * T * C
-        var dl_qkv: UnsafePointer[
-            Scalar[dtype]
-        ] = model.grads_acts.qkv + l * B * T * 3 * C
-        var dl_atty: UnsafePointer[
-            Scalar[dtype]
-        ] = model.grads_acts.atty + l * B * T * C
-        var dl_preatt: UnsafePointer[
-            Scalar[dtype]
-        ] = model.grads_acts.preatt + l * B * NH * T * T
-        var dl_att: UnsafePointer[
-            Scalar[dtype]
-        ] = model.grads_acts.att + l * B * NH * T * T
-        var dl_attproj: UnsafePointer[
-            Scalar[dtype]
-        ] = model.grads_acts.attproj + l * B * T * C
-        var dl_residual2: UnsafePointer[
-            Scalar[dtype]
-        ] = model.grads_acts.residual2 + l * B * T * C
-        var dl_ln2: UnsafePointer[
-            Scalar[dtype]
-        ] = model.grads_acts.ln2 + l * B * T * C
-        var dl_fch: UnsafePointer[
-            Scalar[dtype]
-        ] = model.grads_acts.fch + l * B * T * 4 * C
-        var dl_fch_gelu: UnsafePointer[
-            Scalar[dtype]
-        ] = model.grads_acts.fch_gelu + l * B * T * 4 * C
-        var dl_fcproj: UnsafePointer[
-            Scalar[dtype]
-        ] = model.grads_acts.fcproj + l * B * T * C
-        var dl_residual3: UnsafePointer[
-            Scalar[dtype]
-        ] = model.grads_acts.residual3 + l * B * T * C
+        var dl_ln1: UnsafePointer[Scalar[dtype]] = (
+            model.grads_acts.ln1 + l * B * T * C
+        )
+        var dl_qkv: UnsafePointer[Scalar[dtype]] = (
+            model.grads_acts.qkv + l * B * T * 3 * C
+        )
+        var dl_atty: UnsafePointer[Scalar[dtype]] = (
+            model.grads_acts.atty + l * B * T * C
+        )
+        var dl_preatt: UnsafePointer[Scalar[dtype]] = (
+            model.grads_acts.preatt + l * B * NH * T * T
+        )
+        var dl_att: UnsafePointer[Scalar[dtype]] = (
+            model.grads_acts.att + l * B * NH * T * T
+        )
+        var dl_attproj: UnsafePointer[Scalar[dtype]] = (
+            model.grads_acts.attproj + l * B * T * C
+        )
+        var dl_residual2: UnsafePointer[Scalar[dtype]] = (
+            model.grads_acts.residual2 + l * B * T * C
+        )
+        var dl_ln2: UnsafePointer[Scalar[dtype]] = (
+            model.grads_acts.ln2 + l * B * T * C
+        )
+        var dl_fch: UnsafePointer[Scalar[dtype]] = (
+            model.grads_acts.fch + l * B * T * 4 * C
+        )
+        var dl_fch_gelu: UnsafePointer[Scalar[dtype]] = (
+            model.grads_acts.fch_gelu + l * B * T * 4 * C
+        )
+        var dl_fcproj: UnsafePointer[Scalar[dtype]] = (
+            model.grads_acts.fcproj + l * B * T * C
+        )
+        var dl_residual3: UnsafePointer[Scalar[dtype]] = (
+            model.grads_acts.residual3 + l * B * T * C
+        )
 
         # backprop this layer
         residual_backward(dl_residual2, dl_fcproj, dl_residual3, B * T * C)
@@ -1720,13 +1713,15 @@ fn gpt2_update(
             var grad = model.grads_memory.load[width=width](iv)
 
             # update the first moment (momentum)
-            var m = beta1 * model.m_memory.load[width=width](iv) + (
-                1.0 - beta1
-            ) * grad
+            var m = (
+                beta1 * model.m_memory.load[width=width](iv)
+                + (1.0 - beta1) * grad
+            )
             # update the second moment (RMSprop)
-            var v = beta2 * model.v_memory.load[width=width](iv) + (
-                1.0 - beta2
-            ) * grad * grad
+            var v = (
+                beta2 * model.v_memory.load[width=width](iv)
+                + (1.0 - beta2) * grad * grad
+            )
             # bias-correct both moments
             var m_hat = m / (1.0 - pow(beta1, t))
             var v_hat = v / (1.0 - pow(beta2, t))
@@ -1765,40 +1760,35 @@ fn gpt2_free(mut model: GPT2):
 # returns random batches of data from a file of integers
 
 
-struct DataLoader:
+struct DataLoader[B: Int, T: Int]:
     # hyperparameters
-    var B: Int
-    var T: Int
+
     # input handling and its state
-    var filename: StringRef
+    var filename: String
     var tokens_file: FileHandle
     var file_size: Int
     var current_position: Int
     # output memory
-    var batch: UnsafePointer[Scalar[dtype_int]]
+    var batch: InlineArray[Scalar[dtype_int], B * T + 1]
     var inputs: UnsafePointer[Scalar[dtype_int]]
     var targets: UnsafePointer[Scalar[dtype_int]]
     # convenience variables
     var num_batches: Int
 
     fn __init__(out self):
-        self.B = 0
-        self.T = 0
         self.filename = ""
         self.tokens_file = FileHandle()
         self.file_size = 0
         self.current_position = 0
-        self.batch = UnsafePointer[Scalar[dtype_int]]()
-        self.inputs = UnsafePointer[Scalar[dtype_int]]()
-        self.targets = UnsafePointer[Scalar[dtype_int]]()
+        self.batch = InlineArray[Scalar[dtype_int], B * T + 1](fill=0)
+        self.inputs = self.batch.unsafe_ptr()
+        self.targets = self.batch.unsafe_ptr() + 1  # targets are shifted by one
         self.num_batches = 0
 
 
 fn dataloader_init(
-    mut loader: DataLoader, filename: StringRef, B: Int, T: Int
+    mut loader: DataLoader, filename: String, B: Int, T: Int
 ) raises:
-    loader.B = B
-    loader.T = T
     try:
         loader.tokens_file = open(filename, "rb")
     except e:
@@ -1807,7 +1797,7 @@ fn dataloader_init(
 
     # determine the file size
     _os = Python.import_module("os")
-    loader.file_size = int(_os.path.getsize(filename))
+    loader.file_size = Int(_os.path.getsize(filename))
 
     if loader.file_size < (B * T + 1) * 4:
         print(
@@ -1817,11 +1807,10 @@ fn dataloader_init(
 
     loader.current_position = 0  # start at the beginning
 
-    # allocate space for B*T + 1 integers to store the inputs and targets loader.batch = (int*) malloc((B * T + 1) * sizeof(int))
-
-    loader.batch = UnsafePointer[Scalar[dtype_int]]().alloc(B * T + 1)
-    loader.inputs = loader.batch
-    loader.targets = loader.batch + 1  # targets are shifted by one
+    # allocate space for B*T + 1 integers to store the inputs and targets
+    # Note: batch is already allocated in __init__, just set up the pointers
+    loader.inputs = loader.batch.unsafe_ptr()
+    loader.targets = loader.batch.unsafe_ptr() + 1  # targets are shifted by one
     loader.num_batches = loader.file_size // (B * T * SIZEOF_INT)
 
 
@@ -1840,7 +1829,7 @@ fn dataloader_next_batch(mut loader: DataLoader) raises:
     # read the B*T+1 integers from the file into batch
     _ = loader.tokens_file.seek(loader.current_position)
 
-    read_to_dtype_pointer(loader.batch, loader.tokens_file, B * T + 1)
+    read_to_buf(loader.batch, loader.tokens_file)
 
     # advance the current position by B*T integers
     loader.current_position += B * T * SIZEOF_INT
@@ -1848,7 +1837,7 @@ fn dataloader_next_batch(mut loader: DataLoader) raises:
 
 fn dataloader_free(mut loader: DataLoader) raises:
     loader.tokens_file.close()
-    loader.batch.free()
+    # Note: InlineArray doesn't need explicit free, it's stack allocated
 
 
 # ----------------------------------------------------------------------------
@@ -1889,7 +1878,7 @@ struct Tokenizer:
     var token_table: List[String]
     var init_ok: Int
 
-    fn __init__(out self, filename: StringRef) raises:
+    fn __init__(out self, filename: String) raises:
         self.vocab_size = 0
         self.token_table = List[String]()
         self.init_ok = 0
@@ -1908,8 +1897,8 @@ struct Tokenizer:
             self.init_ok = 0
             return
 
-        var header = UnsafePointer[Scalar[DType.int32]].alloc(256)
-        read_to_dtype_pointer(header, file, 256)
+        var header = InlineArray[Int32, 256](fill=0)
+        _ = file.read(header)
 
         if header[0] != 20240328:
             print("Bad magic model file", header[0])
@@ -1918,10 +1907,10 @@ struct Tokenizer:
             print("Bad version in model file", header[1])
             exit(1)
 
-        self.vocab_size = int(header[2])
+        self.vocab_size = Int(header[2])
 
-        for i in range(self.vocab_size):
-            var length = int(file.read_bytes(1)[0])
+        for _ in range(self.vocab_size):
+            var length = Int(file.read_bytes(1)[0])
             var str: String = file.read(length)
             if length > 0 and len(str) > 0:
                 self.token_table.append(str)
@@ -1943,7 +1932,7 @@ struct Tokenizer:
     fn safe_printf(self, s: String):
         # the tokens are raw bytes, and we we only want to print the printable ones
         # many bytes can be various control codes, backspace, etc.
-        if s == str(NULL):
+        if s == String(NULL):
             return
         if s[0] == "\0":
             return
@@ -1961,17 +1950,21 @@ struct Tokenizer:
         print(s, end="")
 
 
+fn read_to_buf[
+    T: DType
+](mut buf: InlineArray[Scalar[T]], file_handle: FileHandle) raises -> None:
+    _ = file_handle.read(buf)
+
+
 fn read_to_dtype_pointer[
     T: DType
 ](
-    mut ptr: UnsafePointer[Scalar[T]],
-    file_handle: FileHandle,
-    num: Int,
-    alloc: Bool = False,
+    ptr: UnsafePointer[Scalar[T]], file_handle: FileHandle, size: Int
 ) raises -> None:
-    if alloc:
-        ptr = UnsafePointer[Scalar[T]].alloc(num)
-    _ = file_handle.read(ptr, num)
+    # Read directly into the pointer using read_bytes
+    var bytes_to_read = size * sizeof[Scalar[T]]()
+    var bytes_data = file_handle.read_bytes(bytes_to_read)
+    memcpy(ptr.bitcast[UInt8](), bytes_data.unsafe_ptr(), bytes_to_read)
 
 
 # ----------------------------------------------------------------------------
@@ -1983,13 +1976,13 @@ fn main() raises:
     var model = GPT2("gpt2_124M.bin")
 
     # build the DataLoaders from tokens files. for now use tiny_shakespeare if available, else tiny_stories
-    var tiny_stories_train: StringRef = "./data/TinyStories_train.bin"
-    var tiny_stories_val: StringRef = "./data/TinyStories_val.bin"
-    var tiny_shakespeare_train: StringRef = "./data/tiny_shakespeare_train.bin"
-    var tiny_shakespeare_val: StringRef = "./data/tiny_shakespeare_val.bin"
+    var tiny_stories_train: String = "./data/TinyStories_train.bin"
+    var tiny_stories_val: String = "./data/TinyStories_val.bin"
+    var tiny_shakespeare_train: String = "./data/tiny_shakespeare_train.bin"
+    var tiny_shakespeare_val: String = "./data/tiny_shakespeare_val.bin"
 
-    var train_tokens: StringRef = tiny_shakespeare_train
-    var val_tokens: StringRef = tiny_shakespeare_val
+    var train_tokens: String = tiny_shakespeare_train
+    var val_tokens: String = tiny_shakespeare_val
 
     try:
         var file = open(tiny_shakespeare_train, "r")
@@ -1999,12 +1992,12 @@ fn main() raises:
         train_tokens = tiny_stories_train
         val_tokens = tiny_stories_val
 
-    var B: Int = 4
-    var T: Int = 64
-    var train_loader = DataLoader()
+    alias B: Int = 4
+    alias T: Int = 64
+    var train_loader = DataLoader[B, T]()
     dataloader_init(train_loader, train_tokens, B, T)
     print("train dataset num_batches:", train_loader.num_batches)
-    var val_loader = DataLoader()
+    var val_loader = DataLoader[B, T]()
     dataloader_init(val_loader, val_tokens, B, T)
     print("val dataset num_batches:", val_loader.num_batches)
     var val_num_batches: Int = 10
@@ -2047,9 +2040,9 @@ fn main() raises:
                 # leaving this alone because you want separate code for inference anyway
                 # the inference here is just for sanity checking purposes
                 gpt2_forward(model, gen_tokens, NULL_INT, 1, t)
-                var probs = model.acts.probs + (
-                    t - 1
-                ) * model.config.padded_vocab_size
+                var probs = (
+                    model.acts.probs + (t - 1) * model.config.padded_vocab_size
+                )
                 var coin: FLOAT = random_f32(rng_state).cast[dtype]()
                 var next_token: Int = sample_mult(
                     probs, model.config.vocab_size, coin
@@ -2082,13 +2075,13 @@ fn main() raises:
 
         print(
             "step "
-            + str(step)
+            + String(step)
             + ": train loss "
-            + str(model.mean_loss)
+            + String(model.mean_loss)
             + " (took "
-            + str(int(elapsed_time_ms))
+            + String(Int(elapsed_time_ms))
             + " ms, average: "
-            + str(int(elapsed_time_ms_total / (step + 1)))
+            + String(Int(elapsed_time_ms_total / (step + 1)))
             + " ms)"
         )
 
