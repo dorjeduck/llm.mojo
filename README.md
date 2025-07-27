@@ -48,8 +48,8 @@ Basic benchmark results: (M2 MacBook Pro)
 
 | Implementation             | Average Training Loop Time |
 |----------------------------|----------------------------|
-| train_gpt2.mojo            | 1819 ms                    |
-| train_gpt2.c (with OpenMP) | 1849 ms                    |
+| train_gpt2.mojo            | 1732 ms                    |
+| train_gpt2.c (with OpenMP) | 1836 ms                    |
 | train_gpt2.c (no OpenMP)   | 7473 ms                    |
 
 !['Training Loop Times'](imgs/training_loop_times_chart.png)
