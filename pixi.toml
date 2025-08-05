@@ -8,4 +8,4 @@ version = "0.1.0"
 [tasks]
 
 [dependencies]
-modular = "25.4.*"
+mojo = "25.5.*"

@@ -2,7 +2,7 @@
 
 This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/llm.c) to [Mojo](https://docs.modular.com/mojo), currently in beta. Visit [llm.c](https://github.com/karpathy/llm.c) for a detailed explanation of the original project.
 
-> **Note**: This project is based on the stable Mojo 25.4 release.
+> **Note**: This project is based on the stable Mojo 25.5 release.
 
 ## Prerequisite
 
@@ -64,6 +64,8 @@ At this stage, there are no plans for further development of this app. It primar
   
 ## Changelog
 
+- 2025.08.05
+  - Update to Mojo 25.5
 - 2025.07.27
   - Update to Mojo 25.4
 - 2024.12.17

@@ -3,13 +3,13 @@ from collections import InlineArray
 from math import sqrt, exp, tanh, cosh, log
 from memory import UnsafePointer, memset, memset_zero, memcpy
 from python import Python
-from sys import exit
-from sys.info import is_apple_silicon, simdwidthof, sizeof
+from sys import exit, CompilationTarget
+from sys.info import simdwidthof, sizeof
 from time import perf_counter_ns
 
 
 fn get_simd_width() -> Int:
-    if is_apple_silicon():
+    if CompilationTarget.is_apple_silicon():
         return 4 * simdwidthof[dtype]()
     else:
         return 2 * simdwidthof[dtype]()
@@ -936,7 +936,7 @@ struct ParameterTensors:
 alias NUM_ACTIVATION_TENSORS = 23
 
 
-@value
+@fieldwise_init
 struct ActivationTensors:
     var encoded: UnsafePointer[Scalar[dtype]]  # (B, T, C)
     var ln1: UnsafePointer[Scalar[dtype]]  # (L, B, T, C)
@@ -1034,7 +1034,7 @@ struct ActivationTensors:
         return acts_memory
 
 
-@value
+@fieldwise_init
 struct GPT2Config:
     var max_seq_len: Int  # max sequence length, e.g. 1024
     var vocab_size: Int  # vocab size, e.g. 50257
@@ -1790,7 +1790,7 @@ fn dataloader_init(
     mut loader: DataLoader, filename: String, B: Int, T: Int
 ) raises:
     try:
-        loader.tokens_file = open(filename, "rb")
+        loader.tokens_file = open(filename, "r")
     except e:
         print("Error opening file", filename, e)
         exit(1)
@@ -1886,7 +1886,7 @@ struct Tokenizer:
         var file: FileHandle
 
         try:
-            file = open(filename, "rb")
+            file = open(filename, "r")
         except:
             print("---")
             print("WARNING: Failed to open the tokenizer file", filename)
