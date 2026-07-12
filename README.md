@@ -1,14 +1,16 @@
 # llm.🔥
 
-This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/llm.c) to [Mojo](https://docs.modular.com/mojo), currently in beta. Visit [llm.c](https://github.com/karpathy/llm.c) for a detailed explanation of the original project.
+This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/llm.c) to [Mojo](https://mojolang.org), currently in beta. Visit [llm.c](https://github.com/karpathy/llm.c) for a detailed explanation of the original project.
 
-> **Note**: This project is based on the stable Mojo 25.5 release.
+> **Note**: We are preparing this repo for the upcoming Mojo 1.0 release — this is work in progress. It currently builds against the Mojo 1.0.0b2 beta.
 
 ## Prerequisite
 
-Before using llm.🔥 for the first time, please run the following preparatory commands:
+Before using llm.🔥 for the first time, please run the following preparatory commands in a virtual environment:
   
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 python prepro_tinyshakespeare.py  
 python train_gpt2.py
@@ -48,7 +50,7 @@ Basic benchmark results: (M2 MacBook Pro)
 
 | Implementation             | Average Training Loop Time |
 |----------------------------|----------------------------|
-| train_gpt2.mojo            | 1732 ms                    |
+| train_gpt2.mojo            | 1721 ms                    |
 | train_gpt2.c (with OpenMP) | 1836 ms                    |
 | train_gpt2.c (no OpenMP)   | 7473 ms                    |
 
@@ -58,12 +60,18 @@ Basic benchmark results: (M2 MacBook Pro)
 
 We ported `test_gpt2.c` from the original repository to Mojo to validate our port's functionality. For instructions on how to run this test and insights into the results it yields, please see our guide [here](./test.md).
 
-## Development Roadmap
+## Project Outlook
 
-At this stage, there are no plans for further development of this app. It primarily serves as a proof of concept, showcasing Mojo's ability to implement C-like applications in terms of speed and low-level programming. That said, I’m always open to new ideas or collaboration opportunities, so feel free to reach out to discuss ideas.
-  
+llm.🔥 began in 2024 as a response to Karpathy's then newly released [llm.c](https://github.com/karpathy/llm.c). Its purpose was to show that Mojo could implement the same low-level, C-style program — raw pointers, manual memory management — while matching its performance.
+
+Sustained interest in the repo has kept us updating it to track new Mojo releases, without expanding its scope. In that same spirit, our next planned milestone is a port to **Mojo 1.0**. Beyond 1.0 we have no concrete plans to develop the project further.
+
+We occasionally weighed adding GPU support. That ground is now well covered by [ulmentflam/llm.mojo](https://github.com/ulmentflam/llm.mojo), a GPU-accelerated port built on hand-written CUDA and Metal kernels via MAX. It also shows how far *pure-CPU* throughput can be pushed by leaning on MAX's `linalg` GEMM kernel (`linalg.matmul` — cache/register-tiled, SIMD-vectorized, multi-threaded) instead of hand-written loops: in a matched side-by-side benchmark it runs roughly **6× faster than this project on CPU** (fp32, same machine, same workload).
+
 ## Changelog
 
+- 2026.07.11
+  - Update to Mojo 1.0.0b2 (`fn` → `def`, `alias` → `comptime`, `std.` imports, non-null `UnsafePointer` with origins, unified closures with capture lists, new `vectorize` API)
 - 2025.08.05
   - Update to Mojo 25.5
 - 2025.07.27

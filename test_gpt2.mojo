@@ -1,34 +1,28 @@
-from collections import InlineArray
-from time import perf_counter_ns
-from sys import exit
-from sys.info import sizeof
-from memory import UnsafePointer, memcpy
+from std.collections import InlineArray
+from std.time import perf_counter_ns
+from std.sys.info import size_of
+from std.memory import UnsafePointer, alloc, memcpy
 
 
-from train_gpt2 import (
-    GPT2,
-    ParameterTensors,
-    gpt2_forward,
-    gpt2_zero_grad,
-    gpt2_backward,
-    gpt2_update,
-    gpt2_free,
-)
+from train_gpt2 import GPT2, ParameterTensors
 
-alias dtype = DType.float32
-alias FLOAT = SIMD[dtype, 1]
+comptime dtype = DType.float32
+comptime FLOAT = SIMD[dtype, 1]
 
-alias dtype_int = DType.int32
-alias INT = SIMD[dtype_int, 1]
+comptime dtype_int = DType.int32
+comptime INT = SIMD[dtype_int, 1]
 
-alias SIZEOF_INT = sizeof[DType.int32]()
-alias SIZEOF_FLOAT = sizeof[DType.float32]()
+comptime FloatPtr = UnsafePointer[Scalar[dtype], MutUntrackedOrigin]
+comptime IntPtr = UnsafePointer[Scalar[dtype_int], MutUntrackedOrigin]
+
+comptime SIZEOF_INT = size_of[DType.int32]()
+comptime SIZEOF_FLOAT = size_of[DType.float32]()
 
 
 # poor man's tensor checker
-fn check_tensor(
-    mut a: UnsafePointer[SIMD[dtype, 1]],
-    mut b: UnsafePointer[SIMD[dtype, 1]],
+def check_tensor(
+    a: FloatPtr,
+    b: FloatPtr,
     n: Int,
     label: String,
 ) -> Bool:
@@ -69,18 +63,22 @@ fn check_tensor(
     return ok
 
 
-fn read_to_dtype_pointer[
+def read_to_dtype_pointer[
     T: DType
 ](
-    ptr: UnsafePointer[Scalar[T]], file_handle: FileHandle, size: Int
+    ptr: UnsafePointer[Scalar[T], MutUntrackedOrigin], file_handle: FileHandle, size: Int
 ) raises -> None:
     # Read directly into the pointer using read_bytes
-    var bytes_to_read = size * sizeof[Scalar[T]]()
+    var bytes_to_read = size * size_of[Scalar[T]]()
     var bytes_data = file_handle.read_bytes(bytes_to_read)
-    memcpy(ptr.bitcast[UInt8](), bytes_data.unsafe_ptr(), bytes_to_read)
+    memcpy(
+        dest=ptr.bitcast[UInt8](),
+        src=bytes_data.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin](),
+        count=bytes_to_read,
+    )
 
 
-fn main() raises:
+def main() raises:
     # build the GPT-2 model from a checkpoint
     var model = GPT2("gpt2_124M.bin")
 
@@ -93,15 +91,13 @@ fn main() raises:
 
     var state_file = open("gpt2_124M_debug_state.bin", "r")
 
-    var state_header = UnsafePointer[SIMD[DType.int32, 1]].alloc(256)
+    var state_header = alloc[Scalar[dtype_int]](256)
     read_to_dtype_pointer[DType.int32](state_header, state_file, 256)
 
     if state_header[0] != 20240327:
-        print("Bad magic model file")
-        exit(1)
+        raise Error(t"Bad magic state file {state_header[0]}")
     if state_header[1] != 2:
-        print("Bad version in model file:", state_header[1])
-        exit(1)
+        raise Error(t"Bad version in state file {state_header[1]}")
 
     var B: Int = Int(state_header[2])  # batch size, e.g. 4
     var T: Int = Int(
@@ -112,18 +108,16 @@ fn main() raises:
     print("batch_size:", B)
     print("seq_len:", T)
 
-    var expected_grads = ParameterTensors()
-    var expected_grads_memory = expected_grads.alloc_and_point_parameters(
-        model.param_sizes
-    )
+    var expected_grads = ParameterTensors(model.param_sizes)
+    var expected_grads_memory = expected_grads.params_memory
 
     # inputs and expected outputs, only used for error checking
 
-    var x = UnsafePointer[SIMD[dtype_int, 1]]().alloc(B * T)
-    var y = UnsafePointer[SIMD[dtype_int, 1]]().alloc(B * T)
+    var x = alloc[Scalar[dtype_int]](B * T)
+    var y = alloc[Scalar[dtype_int]](B * T)
 
-    var expected_logits = UnsafePointer[SIMD[dtype, 1]]().alloc(B * T * V)
-    var expected_loss = UnsafePointer[SIMD[dtype, 1]]().alloc(1)
+    var expected_logits = alloc[Scalar[dtype]](B * T * V)
+    var expected_loss = alloc[Scalar[dtype]](1)
 
     # read reference information from Python
 
@@ -139,13 +133,13 @@ fn main() raises:
 
     # overall OK signal for the test
     var allok: Bool = True
-    var elapsed_time_ms = 0.0
+    var elapsed_time_ms: Float64
 
     # let's do 10 training iterations, following the pytorch code
 
     # var losses = InlinedFixedVector[type=Float32,size=10](10)
 
-    var expected_losses = List[Float32](
+    var expected_losses: List[Float32] = [
         5.270007133483887,
         4.059706687927246,
         3.3751230239868164,
@@ -156,17 +150,19 @@ fn main() raises:
         0.9991465210914612,
         0.6240804195404053,
         0.37651097774505615,
-    )
+    ]
 
     for step in range(10):
         var start = perf_counter_ns()
-        gpt2_forward(model, x, y, B, T)
-        gpt2_zero_grad(model)
-        gpt2_backward(model)
+        model.forward(x, y, B, T)
+        model.zero_grad()
+        model.backward()
 
-        elapsed_time_ms = (perf_counter_ns() - start) / 1_000_000
+        elapsed_time_ms = Float64(perf_counter_ns() - start) / 1_000_000
         if step == 0:
             # error checking at step 0 for reference activations/gradients
+            ref acts = model.acts.value()
+            ref grads = model.grads.value()
 
             # at this point, target should be equal to expected_logits, let's compare
 
@@ -174,11 +170,11 @@ fn main() raises:
 
             for i in range(B * T * V):
                 if i < 3:
-                    print(expected_logits[i], model.acts.logits[i])
+                    print(expected_logits[i], acts.logits[i])
 
-                if abs(expected_logits[i] - model.acts.logits[i]) >= 1e-2:
+                if abs(expected_logits[i] - acts.logits[i]) >= 1e-2:
                     print("MISMATCH AT INDEX " + String(i) + ":")
-                    print(expected_logits[i], model.acts.logits[i])
+                    print(expected_logits[i], acts.logits[i])
                     logits_ok = False
                     break
 
@@ -198,67 +194,67 @@ fn main() raises:
             var gradoks = InlineArray[Bool, 16](fill=False)
 
             gradoks[0] = check_tensor(
-                model.grads.wte, expected_grads.wte, V * C, "dwte"
+                grads.wte, expected_grads.wte, V * C, "dwte"
             )
             gradoks[1] = check_tensor(
-                model.grads.wpe, expected_grads.wpe, maxT * C, "dwpe"
+                grads.wpe, expected_grads.wpe, maxT * C, "dwpe"
             )
             gradoks[2] = check_tensor(
-                model.grads.ln1w, expected_grads.ln1w, L * C, "dln1w"
+                grads.ln1w, expected_grads.ln1w, L * C, "dln1w"
             )
             gradoks[3] = check_tensor(
-                model.grads.ln1b, expected_grads.ln1b, L * C, "dln1b"
+                grads.ln1b, expected_grads.ln1b, L * C, "dln1b"
             )
             gradoks[4] = check_tensor(
-                model.grads.qkvw, expected_grads.qkvw, L * 3 * C * C, "dqkvw"
+                grads.qkvw, expected_grads.qkvw, L * 3 * C * C, "dqkvw"
             )
             gradoks[5] = check_tensor(
-                model.grads.qkvb, expected_grads.qkvb, L * 3 * C, "dqkvb"
+                grads.qkvb, expected_grads.qkvb, L * 3 * C, "dqkvb"
             )
             gradoks[6] = check_tensor(
-                model.grads.attprojw,
+                grads.attprojw,
                 expected_grads.attprojw,
                 L * C * C,
                 "dattprojw",
             )
             gradoks[7] = check_tensor(
-                model.grads.attprojb,
+                grads.attprojb,
                 expected_grads.attprojb,
                 L * C,
                 "dattprojb",
             )
             gradoks[8] = check_tensor(
-                model.grads.ln2w, expected_grads.ln2w, L * C, "dln2w"
+                grads.ln2w, expected_grads.ln2w, L * C, "dln2w"
             )
             gradoks[9] = check_tensor(
-                model.grads.ln2b, expected_grads.ln2b, L * C, "dln2b"
+                grads.ln2b, expected_grads.ln2b, L * C, "dln2b"
             )
             gradoks[10] = check_tensor(
-                model.grads.fcw, expected_grads.fcw, L * 4 * C * C, "dfcw"
+                grads.fcw, expected_grads.fcw, L * 4 * C * C, "dfcw"
             )
             gradoks[11] = check_tensor(
-                model.grads.fcb, expected_grads.fcb, L * 4 * C, "dfcb"
+                grads.fcb, expected_grads.fcb, L * 4 * C, "dfcb"
             )
             gradoks[12] = check_tensor(
-                model.grads.fcprojw,
+                grads.fcprojw,
                 expected_grads.fcprojw,
                 L * C * 4 * C,
                 "dfcprojw",
             )
             gradoks[13] = check_tensor(
-                model.grads.fcprojb, expected_grads.fcprojb, L * C, "dfcprojb"
+                grads.fcprojb, expected_grads.fcprojb, L * C, "dfcprojb"
             )
             gradoks[14] = check_tensor(
-                model.grads.lnfw, expected_grads.lnfw, C, "dlnfw"
+                grads.lnfw, expected_grads.lnfw, C, "dlnfw"
             )
             gradoks[15] = check_tensor(
-                model.grads.lnfb, expected_grads.lnfb, C, "dlnfb"
+                grads.lnfb, expected_grads.lnfb, C, "dlnfb"
             )
 
             for i in range(16):
                 allok = allok and gradoks[i]
 
-        gpt2_update(model, 1e-4, 0.9, 0.999, 1e-8, 0.01, step + 1)
+        model.update(1e-4, 0.9, 0.999, 1e-8, 0.01, step + 1)
 
         var expected_loss = expected_losses[step]
         var actual_loss = model.mean_loss
@@ -268,14 +264,7 @@ fn main() raises:
         # prvar the:Int timing information at the end
 
         print(
-            "step "
-            + String(step)
-            + ": loss "
-            + String(model.mean_loss)
-            + " (took "
-            + String(elapsed_time_ms)
-            + " ms) OK = "
-            + String(step_loss_ok)
+            t"step {step}: loss {model.mean_loss} (took {elapsed_time_ms} ms) OK = {step_loss_ok}"
         )
 
     print("overall okay:", allok)

@@ -1,118 +1,117 @@
-from algorithm import vectorize, parallelize
-from collections import InlineArray
-from math import sqrt, exp, tanh, cosh, log
-from memory import UnsafePointer, memset, memset_zero, memcpy
-from python import Python
-from sys import exit, CompilationTarget
-from sys.info import simdwidthof, sizeof
-from time import perf_counter_ns
+from std.algorithm import vectorize, parallelize
+from std.collections import InlineArray
+from std.math import sqrt, exp, tanh, cosh, log
+from std.memory import UnsafePointer, alloc, memset, memset_zero, memcpy
+from std.os.path import getsize
+from std.sys import CompilationTarget
+from std.sys.info import simd_width_of, size_of
+from std.time import perf_counter_ns
 
 
-fn get_simd_width() -> Int:
+def get_simd_width() -> Int:
     if CompilationTarget.is_apple_silicon():
-        return 4 * simdwidthof[dtype]()
+        return 4 * simd_width_of[dtype]()
     else:
-        return 2 * simdwidthof[dtype]()
+        return 2 * simd_width_of[dtype]()
 
 
-alias dtype = DType.float32  # must be float32 for now
-alias dtype_int = DType.int32  # must be int32 for now
+comptime dtype = DType.float32  # must be float32 for now
+comptime dtype_int = DType.int32  # must be int32 for now
 
-alias SIZEOF_FLOAT = sizeof[dtype]()
-alias SIZEOF_INT = sizeof[dtype_int]()
+comptime SIZEOF_FLOAT = size_of[dtype]()
+comptime SIZEOF_INT = size_of[dtype_int]()
 
-alias SIMD_WIDTH = get_simd_width()
+comptime SIMD_WIDTH = get_simd_width()
 
-alias RU32_HEX = 0x2545F4914F6CDD1D
-alias RF32_DIV = 16777216.0
+comptime RU32_HEX = 0x2545F4914F6CDD1D
+comptime RF32_DIV = 16777216.0
 
 
-alias FLOAT = SIMD[dtype, 1]
-alias INT = SIMD[dtype_int, 1]
+comptime FLOAT = SIMD[dtype, 1]
+comptime INT = SIMD[dtype_int, 1]
 
-alias NULL = UnsafePointer[Scalar[dtype]]()
-alias NULL_INT = UnsafePointer[Scalar[dtype_int]]()
-alias M_PI: FLOAT = 3.141592653589793115997963468544185161590576171875
+comptime FloatPtr = UnsafePointer[Scalar[dtype], MutUntrackedOrigin]
+comptime IntPtr = UnsafePointer[Scalar[dtype_int], MutUntrackedOrigin]
 
-alias GPT2_EOT = 50256
+comptime M_PI: FLOAT = 3.141592653589793115997963468544185161590576171875
 
-alias NUM_PARALLELIZE = 8
-alias UNROLL_FACTOR = 4
+comptime GPT2_EOT = 50256
+
+comptime NUM_PARALLELIZE = 8
+comptime UNROLL_FACTOR = 4
 
 
 ## ----------------------------------------------------------------------------
 # all the individual layers' forward and backward passes
 
 
-fn encoder_forward(
-    vout: UnsafePointer[Scalar[dtype]],
-    inp: UnsafePointer[Scalar[dtype_int]],
-    wte: UnsafePointer[Scalar[dtype]],
-    wpe: UnsafePointer[Scalar[dtype]],
+def encoder_forward(
+    vout: FloatPtr,
+    inp: IntPtr,
+    wte: FloatPtr,
+    wpe: FloatPtr,
     B: Int,
     T: Int,
     C: Int,
 ):
     @parameter
-    fn _calc(b: Int):
+    def _calc(b: Int):
         for t in range(T):
             # seek to the output position in out[b,t,:]
-            var out_bt: UnsafePointer[Scalar[dtype]] = vout + b * T * C + t * C
+            var out_bt: FloatPtr = vout + b * T * C + t * C
             # get the index of the token at inp[b, t]
             var ix = inp[b * T + t]
             # seek to the position in wte corresponding to the token
-            var wte_ix: UnsafePointer[Scalar[dtype]] = wte + Int(ix) * C
+            var wte_ix: FloatPtr = wte + Int(ix) * C
             # seek to the position in wpe corresponding to the position
-            var wpe_t: UnsafePointer[Scalar[dtype]] = wpe + t * C
+            var wpe_t: FloatPtr = wpe + t * C
             # add the two vectors and store the result in out[b,t,:]
 
-            @parameter
-            fn _op[width: Int](iv: Int):
+            def _op[width: Int](iv: Int) {out_bt, wte_ix, wpe_t}:
                 out_bt.store(
                     iv,
                     wte_ix.load[width=width](iv) + wpe_t.load[width=width](iv),
                 )
 
-            vectorize[_op, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](size=C)
+            vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](C, _op)
 
     parallelize[_calc](B)
 
 
-fn encoder_backward(
-    dwte: UnsafePointer[Scalar[dtype]],
-    dwpe: UnsafePointer[Scalar[dtype]],
-    dout: UnsafePointer[Scalar[dtype]],
-    inp: UnsafePointer[Scalar[dtype_int]],
+def encoder_backward(
+    dwte: FloatPtr,
+    dwpe: FloatPtr,
+    dout: FloatPtr,
+    inp: IntPtr,
     B: Int,
     T: Int,
     C: Int,
 ):
     @parameter
-    fn _calc(b: Int):
+    def _calc(b: Int):
         for t in range(T):
-            var dout_bt: UnsafePointer[Scalar[dtype]] = dout + b * T * C + t * C
+            var dout_bt: FloatPtr = dout + b * T * C + t * C
             var ix = inp[b * T + t]
-            var dwte_ix: UnsafePointer[Scalar[dtype]] = dwte + Int(ix) * C
-            var dwpe_t: UnsafePointer[Scalar[dtype]] = dwpe + t * C
+            var dwte_ix: FloatPtr = dwte + Int(ix) * C
+            var dwpe_t: FloatPtr = dwpe + t * C
 
-            @parameter
-            fn _op[width: Int](iv: Int):
+            def _op[width: Int](iv: Int) {dout_bt, dwte_ix, dwpe_t}:
                 var d = dout_bt.load[width=width](iv)
                 dwte_ix.store(iv, dwte_ix.load[width=width](iv) + d)
                 dwpe_t.store(iv, dwpe_t.load[width=width](iv) + d)
 
-            vectorize[_op, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](size=C)
+            vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](C, _op)
 
     parallelize[_calc](B)
 
 
-fn layernorm_forward(
-    vout: UnsafePointer[Scalar[dtype]],
-    mean: UnsafePointer[Scalar[dtype]],
-    rstd: UnsafePointer[Scalar[dtype]],
-    inp: UnsafePointer[Scalar[dtype]],
-    weight: UnsafePointer[Scalar[dtype]],
-    bias: UnsafePointer[Scalar[dtype]],
+def layernorm_forward(
+    vout: FloatPtr,
+    mean: FloatPtr,
+    rstd: FloatPtr,
+    inp: FloatPtr,
+    weight: FloatPtr,
+    bias: FloatPtr,
     B: Int,
     T: Int,
     C: Int,
@@ -120,41 +119,38 @@ fn layernorm_forward(
     var eps: FLOAT = 1e-5
 
     @parameter
-    fn _calc(b: Int):
+    def _calc(b: Int):
         for t in range(T):
             # seek to the input position inp[b,t,:]
-            var x: UnsafePointer[Scalar[dtype]] = inp + b * T * C + t * C
+            var x: FloatPtr = inp + b * T * C + t * C
             # calculate the mean
             var m: FLOAT = 0.0
 
-            @parameter
-            fn _op[width: Int](iv: Int):
+            def _op[width: Int](iv: Int) {x, mut m}:
                 m += x.load[width=width](iv).reduce_add[1]()
 
-            vectorize[_op, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](size=C)
+            vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](C, _op)
 
-            m = m / C
+            m = m / FLOAT(C)
 
             # calculate the variance (without any bias correction)
             var v: FLOAT = 0.0
 
-            @parameter
-            fn _op2[width: Int](iv: Int):
+            def _op2[width: Int](iv: Int) {x, m, mut v}:
                 var xshift = x.load[width=width](iv) - m
                 v += pow(xshift, 2).reduce_add[1]()
 
-            vectorize[_op2, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](size=C)
+            vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](C, _op2)
 
-            v = v / C
+            v = v / FLOAT(C)
 
             # calculate the rstd
             var s: FLOAT = FLOAT(1.0) / sqrt(v + eps)
 
             # seek to the output position in out[b,t,:]
-            var out_bt: UnsafePointer[Scalar[dtype]] = vout + b * T * C + t * C
+            var out_bt: FloatPtr = vout + b * T * C + t * C
 
-            @parameter
-            fn _op3[width: Int](iv: Int):
+            def _op3[width: Int](iv: Int) {s, x, m, weight, bias, out_bt}:
                 var n = s * (x.load[width=width](iv) - m)  # normalized output
                 out_bt.store(
                     iv,
@@ -162,7 +158,7 @@ fn layernorm_forward(
                     + bias.load[width=width](iv),
                 )  # scale and shift it
 
-            vectorize[_op3, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](size=C)
+            vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](C, _op3)
 
             # cache the mean and rstd for the backward pass later
             mean[b * T + t] = m
@@ -171,25 +167,25 @@ fn layernorm_forward(
     parallelize[_calc](B)
 
 
-fn layernorm_backward(
-    dinp: UnsafePointer[Scalar[dtype]],
-    dweight: UnsafePointer[Scalar[dtype]],
-    dbias: UnsafePointer[Scalar[dtype]],
-    dout: UnsafePointer[Scalar[dtype]],
-    inp: UnsafePointer[Scalar[dtype]],
-    weight: UnsafePointer[Scalar[dtype]],
-    mean: UnsafePointer[Scalar[dtype]],
-    rstd: UnsafePointer[Scalar[dtype]],
+def layernorm_backward(
+    dinp: FloatPtr,
+    dweight: FloatPtr,
+    dbias: FloatPtr,
+    dout: FloatPtr,
+    inp: FloatPtr,
+    weight: FloatPtr,
+    mean: FloatPtr,
+    rstd: FloatPtr,
     B: Int,
     T: Int,
     C: Int,
 ):
     @parameter
-    fn _calc(b: Int):
+    def _calc(b: Int):
         for t in range(T):
-            var dout_bt: UnsafePointer[Scalar[dtype]] = dout + b * T * C + t * C
-            var inp_bt: UnsafePointer[Scalar[dtype]] = inp + b * T * C + t * C
-            var dinp_bt: UnsafePointer[Scalar[dtype]] = dinp + b * T * C + t * C
+            var dout_bt: FloatPtr = dout + b * T * C + t * C
+            var inp_bt: FloatPtr = inp + b * T * C + t * C
+            var dinp_bt: FloatPtr = dinp + b * T * C + t * C
             var mean_bt: FLOAT = mean[b * T + t]
             var rstd_bt: FLOAT = rstd[b * T + t]
 
@@ -197,8 +193,7 @@ fn layernorm_backward(
             var dnorm_mean: FLOAT = 0.0
             var dnorm_norm_mean: FLOAT = 0.0
 
-            @parameter
-            fn _op[width: Int](iv: Int):
+            def _op[width: Int](iv: Int) {inp_bt, mean_bt, rstd_bt, weight, dout_bt, mut dnorm_mean, mut dnorm_norm_mean}:
                 var norm_bti = (
                     inp_bt.load[width=width](iv) - mean_bt
                 ) * rstd_bt
@@ -208,15 +203,14 @@ fn layernorm_backward(
                 dnorm_mean += dnorm_i.reduce_add[1]()
                 dnorm_norm_mean += (dnorm_i * norm_bti).reduce_add[1]()
 
-            vectorize[_op, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](size=C)
+            vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](C, _op)
 
-            dnorm_mean = dnorm_mean / C
-            dnorm_norm_mean = dnorm_norm_mean / C
+            dnorm_mean = dnorm_mean / FLOAT(C)
+            dnorm_norm_mean = dnorm_norm_mean / FLOAT(C)
 
             # now iterate again and accumulate all the gradients
 
-            @parameter
-            fn _op2[width: Int](iv: Int):
+            def _op2[width: Int](iv: Int) {inp_bt, mean_bt, rstd_bt, weight, dout_bt, dbias, dweight, dinp_bt, dnorm_mean, dnorm_norm_mean}:
                 var norm_bti = (
                     inp_bt.load[width=width](iv) - mean_bt
                 ) * rstd_bt
@@ -242,16 +236,16 @@ fn layernorm_backward(
                     * rstd_bt,
                 )
 
-            vectorize[_op2, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](size=C)
+            vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](C, _op2)
 
     parallelize[_calc](B)
 
 
-fn matmul_forward(
-    vout: UnsafePointer[Scalar[dtype]],
-    inp: UnsafePointer[Scalar[dtype]],
-    weight: UnsafePointer[Scalar[dtype]],
-    bias: UnsafePointer[Scalar[dtype]],
+def matmul_forward(
+    vout: FloatPtr,
+    inp: FloatPtr,
+    weight: FloatPtr,
+    bias: Optional[FloatPtr],
     B: Int,
     T: Int,
     C: Int,
@@ -264,40 +258,39 @@ fn matmul_forward(
     # pragma omp parallel for collapse(2)
 
     @parameter
-    fn _calc(b: Int):
+    def _calc(b: Int):
         for t in range(T):
-            var out_bt: UnsafePointer[Scalar[dtype]] = (
+            var out_bt: FloatPtr = (
                 vout + b * T * OC + t * OC
             )
-            var inp_bt: UnsafePointer[Scalar[dtype]] = inp + b * T * C + t * C
+            var inp_bt: FloatPtr = inp + b * T * C + t * C
 
             for o in range(OC):
                 var val: FLOAT = 0.0
-                if bias != NULL:
-                    val = bias[o]
-                var wrow: UnsafePointer[Scalar[dtype]] = weight + o * C
+                if bias:
+                    val = bias.value()[o]
+                var wrow: FloatPtr = weight + o * C
 
-                @parameter
-                fn _op[width: Int](iv: Int):
+                def _op[width: Int](iv: Int) {inp_bt, wrow, mut val}:
                     var t = inp_bt.load[width=width](iv) * wrow.load[
                         width=width
                     ](iv)
                     val += t.reduce_add[1]()
 
-                vectorize[_op, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](size=C)
+                vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](C, _op)
 
                 out_bt[o] = val
 
     parallelize[_calc](B)
 
 
-fn matmul_backward(
-    dinp: UnsafePointer[Scalar[dtype]],
-    dweight: UnsafePointer[Scalar[dtype]],
-    dbias: UnsafePointer[Scalar[dtype]],
-    dout: UnsafePointer[Scalar[dtype]],
-    inp: UnsafePointer[Scalar[dtype]],
-    weight: UnsafePointer[Scalar[dtype]],
+def matmul_backward(
+    dinp: FloatPtr,
+    dweight: FloatPtr,
+    dbias: Optional[FloatPtr],
+    dout: FloatPtr,
+    inp: FloatPtr,
+    weight: FloatPtr,
     B: Int,
     T: Int,
     C: Int,
@@ -311,63 +304,61 @@ fn matmul_backward(
     # pragma omp parallel for collapse(2)
 
     @parameter
-    fn _calc(b: Int):
+    def _calc(b: Int):
         for t in range(T):
-            var dout_bt: UnsafePointer[Scalar[dtype]] = (
+            var dout_bt: FloatPtr = (
                 dout + b * T * OC + t * OC
             )
-            var dinp_bt: UnsafePointer[Scalar[dtype]] = dinp + b * T * C + t * C
+            var dinp_bt: FloatPtr = dinp + b * T * C + t * C
             for o in range(OC):
-                var wrow: UnsafePointer[Scalar[dtype]] = weight + o * C
+                var wrow: FloatPtr = weight + o * C
                 var d: FLOAT = dout_bt[o]
 
-                @parameter
-                fn _op[width: Int](iv: Int):
+                def _op[width: Int](iv: Int) {dinp_bt, wrow, d}:
                     dinp_bt.store(
                         iv,
                         dinp_bt.load[width=width](iv)
                         + wrow.load[width=width](iv) * d,
                     )  # scale and shift it
 
-                vectorize[_op, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](size=C)
+                vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](C, _op)
 
     parallelize[_calc](B)
     # backward into weight/bias, parallelize over output channels OC
     # pragma omp parallel for
 
     @parameter
-    fn _calc2(o: Int):
+    def _calc2(o: Int):
         for b in range(B):
             for t in range(T):
-                var dout_bt: UnsafePointer[Scalar[dtype]] = (
+                var dout_bt: FloatPtr = (
                     dout + b * T * OC + t * OC
                 )
-                var inp_bt: UnsafePointer[Scalar[dtype]] = (
+                var inp_bt: FloatPtr = (
                     inp + b * T * C + t * C
                 )
-                var dwrow: UnsafePointer[Scalar[dtype]] = dweight + o * C
+                var dwrow: FloatPtr = dweight + o * C
                 var d: FLOAT = dout_bt[o]
-                if dbias != NULL:
-                    dbias[o] += d
+                if dbias:
+                    dbias.value()[o] += d
 
-                @parameter
-                fn _op[width: Int](iv: Int):
+                def _op[width: Int](iv: Int) {dwrow, inp_bt, d}:
                     dwrow.store(
                         iv,
                         dwrow.load[width=width](iv)
                         + inp_bt.load[width=width](iv) * d,
                     )  # scale and shift it
 
-                vectorize[_op, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](size=C)
+                vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](C, _op)
 
     parallelize[_calc2](OC)
 
 
-fn attention_forward(
-    vout: UnsafePointer[Scalar[dtype]],
-    preatt: UnsafePointer[Scalar[dtype]],
-    att: UnsafePointer[Scalar[dtype]],
-    inp: UnsafePointer[Scalar[dtype]],
+def attention_forward(
+    vout: FloatPtr,
+    preatt: FloatPtr,
+    att: FloatPtr,
+    inp: FloatPtr,
     B: Int,
     T: Int,
     C: Int,
@@ -378,45 +369,42 @@ fn attention_forward(
     # output is (B, T, C)
     var C3: Int = C * 3
     var hs: Int = C // NH  # head size
-    var scale: FLOAT = FLOAT(1.0) / sqrt(hs)
+    var scale: FLOAT = FLOAT(1.0) / sqrt(FLOAT(hs))
 
     # pragma omp parallel for collapse(3)
     @parameter
-    fn _calc(b: Int):
+    def _calc(b: Int):
         # for b in range(B):
         for t in range(T):
             for h in range(NH):
-                var query_t: UnsafePointer[Scalar[dtype]] = (
+                var query_t: FloatPtr = (
                     inp + b * T * C3 + t * C3 + h * hs
                 )
-                var preatt_bth: UnsafePointer[Scalar[dtype]] = (
+                var preatt_bth: FloatPtr = (
                     preatt + b * NH * T * T + h * T * T + t * T
                 )
-                var att_bth: UnsafePointer[Scalar[dtype]] = (
+                var att_bth: FloatPtr = (
                     att + b * NH * T * T + h * T * T + t * T
                 )
 
                 # pass 1: calculate query dot key and maxval
-                var maxval: FLOAT = -10000.0  # TODO something better
+                var maxval: FLOAT = FLOAT.MIN_FINITE
 
                 for t2 in range(t + 1):
-                    var key_t2: UnsafePointer[Scalar[dtype]] = (
+                    var key_t2: FloatPtr = (
                         inp + b * T * C3 + t2 * C3 + h * hs + C
                     )  # +C because it's key
 
                     # (query_t) dot (key_t2)
                     var val: FLOAT = 0.0
 
-                    @parameter
-                    fn _op[width: Int](iv: Int):
+                    def _op[width: Int](iv: Int) {query_t, key_t2, mut val}:
                         var t = query_t.load[width=width](iv) * key_t2.load[
                             width=width
                         ](iv)
                         val += t.reduce_add[1]()
 
-                    vectorize[_op, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](
-                        size=hs
-                    )
+                    vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](hs, _op)
 
                     val *= scale
                     if val > maxval:
@@ -427,15 +415,12 @@ fn attention_forward(
                 # pass 2: calculate the exp and keep track of sum
                 var expsum: FLOAT = 0.0
 
-                @parameter
-                fn _op2[width: Int](iv: Int):
+                def _op2[width: Int](iv: Int) {preatt_bth, maxval, att_bth, mut expsum}:
                     var expv = exp(preatt_bth.load[width=width](iv) - maxval)
                     expsum += expv.reduce_add[1]()
                     att_bth.store(iv, expv)
 
-                vectorize[_op2, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](
-                    size=t + 1
-                )
+                vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](t + 1, _op2)
 
                 var expsum_inv: FLOAT = 0.0
                 if expsum != 0.0:
@@ -443,19 +428,16 @@ fn attention_forward(
 
                 # pass 3: normalize to get the softmax
 
-                @parameter
-                fn _op3[width: Int](t2: Int):
+                def _op3[width: Int](t2: Int) {att_bth, expsum_inv}:
                     att_bth.store(
                         t2, att_bth.load[width=width](t2) * expsum_inv
                     )
 
-                vectorize[_op3, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](
-                    size=t + 1
-                )
+                vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](t + 1, _op3)
                 memset_zero(att_bth + t + 1, T - t - 1)
 
                 # pass 4: accumulate weighted values into the output of attention
-                var out_bth: UnsafePointer[Scalar[dtype]] = (
+                var out_bth: FloatPtr = (
                     vout + b * T * C + t * C + h * hs
                 )
                 # for i in range(hs):
@@ -468,28 +450,25 @@ fn attention_forward(
                     )  # +C*2 because it's value
                     var att_btht2: FLOAT = att_bth[t2]
 
-                    @parameter
-                    fn _op4[width: Int](iv: Int):
+                    def _op4[width: Int](iv: Int) {out_bth, att_btht2, value_t2}:
                         out_bth.store(
                             iv,
                             out_bth.load[width=width](iv)
                             + att_btht2 * value_t2.load[width=width](iv),
                         )
 
-                    vectorize[_op4, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](
-                        size=hs
-                    )
+                    vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](hs, _op4)
 
     parallelize[_calc](B)
 
 
-fn attention_backward(
-    dinp: UnsafePointer[Scalar[dtype]],
-    dpreatt: UnsafePointer[Scalar[dtype]],
-    datt: UnsafePointer[Scalar[dtype]],
-    dout: UnsafePointer[Scalar[dtype]],
-    inp: UnsafePointer[Scalar[dtype]],
-    att: UnsafePointer[Scalar[dtype]],
+def attention_backward(
+    dinp: FloatPtr,
+    dpreatt: FloatPtr,
+    datt: FloatPtr,
+    dout: FloatPtr,
+    inp: FloatPtr,
+    att: FloatPtr,
     B: Int,
     T: Int,
     C: Int,
@@ -500,42 +479,41 @@ fn attention_backward(
     # dout is (B, T, C)
     var C3: Int = C * 3
     var hs: Int = C // NH  # head size
-    var scale: FLOAT = FLOAT(1.0) / sqrt(hs)
+    var scale: FLOAT = FLOAT(1.0) / sqrt(FLOAT(hs))
 
     @parameter
-    fn _calc(b: Int):
+    def _calc(b: Int):
         for t in range(T):
             for h in range(NH):
-                var att_bth: UnsafePointer[Scalar[dtype]] = (
+                var att_bth: FloatPtr = (
                     att + b * NH * T * T + h * T * T + t * T
                 )
-                var datt_bth: UnsafePointer[Scalar[dtype]] = (
+                var datt_bth: FloatPtr = (
                     datt + b * NH * T * T + h * T * T + t * T
                 )
-                var dpreatt_bth: UnsafePointer[Scalar[dtype]] = (
+                var dpreatt_bth: FloatPtr = (
                     dpreatt + b * NH * T * T + h * T * T + t * T
                 )
-                var dquery_t: UnsafePointer[Scalar[dtype]] = (
+                var dquery_t: FloatPtr = (
                     dinp + b * T * C3 + t * C3 + h * hs
                 )
-                var query_t: UnsafePointer[Scalar[dtype]] = (
+                var query_t: FloatPtr = (
                     inp + b * T * C3 + t * C3 + h * hs
                 )
 
                 # backward pass 4, through the value accumulation
-                var dout_bth: UnsafePointer[Scalar[dtype]] = (
+                var dout_bth: FloatPtr = (
                     dout + b * T * C + t * C + h * hs
                 )
                 for t2 in range(t + 1):
-                    var value_t2: UnsafePointer[Scalar[dtype]] = (
+                    var value_t2: FloatPtr = (
                         inp + b * T * C3 + t2 * C3 + h * hs + C * 2
                     )  # +C*2 because it's value
-                    var dvalue_t2: UnsafePointer[Scalar[dtype]] = (
+                    var dvalue_t2: FloatPtr = (
                         dinp + b * T * C3 + t2 * C3 + h * hs + C * 2
                     )
 
-                    @parameter
-                    fn _op[width: Int](iv: Int):
+                    def _op[width: Int](iv: Int) {datt_bth, value_t2, dout_bth, dvalue_t2, att_bth, t2}:
                         # for i in range(hs):
                         # in the forward pass this was:
                         # out_bth[i] += att_bth[t2] * value_t2[i]
@@ -550,16 +528,13 @@ fn attention_backward(
                             + att_bth[t2] * dout_bth.load[width=width](iv),
                         )
 
-                    vectorize[_op, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](
-                        size=hs
-                    )
+                    vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](hs, _op)
 
                 # backward pass 2 & 3, the softmax
                 # note that softmax (like e.g. tanh) doesn't need the input (preatt) to backward
                 for t2 in range(t + 1):
 
-                    @parameter
-                    fn _op3[width: Int](t3: Int):
+                    def _op3[width: Int](t3: Int) {att_bth, t2, dpreatt_bth, datt_bth}:
                         var local_derivative = -att_bth[t2] * att_bth.load[
                             width=width
                         ](t3)
@@ -569,22 +544,19 @@ fn attention_backward(
                             + local_derivative * datt_bth[t2],
                         )
 
-                    vectorize[_op3, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](
-                        size=t + 1
-                    )
+                    vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](t + 1, _op3)
                     dpreatt_bth[t2] += att_bth[t2] * datt_bth[t2]
 
                 # backward pass 1, the query @ key matmul
                 for t2 in range(t + 1):
-                    var key_t2: UnsafePointer[Scalar[dtype]] = (
+                    var key_t2: FloatPtr = (
                         inp + b * T * C3 + t2 * C3 + h * hs + C
                     )  # +C because it's key
-                    var dkey_t2: UnsafePointer[Scalar[dtype]] = (
+                    var dkey_t2: FloatPtr = (
                         dinp + b * T * C3 + t2 * C3 + h * hs + C
                     )  # +C because it's key
 
-                    @parameter
-                    fn _op2[width: Int](iv: Int):
+                    def _op2[width: Int](iv: Int) {dquery_t, key_t2, dpreatt_bth, t2, scale, dkey_t2, query_t}:
                         # for i in range(hs):
                         # in the forward pass this was:
                         # preatt_bth[t2] += (query_t[i] * key_t2[i]) * scale
@@ -604,16 +576,14 @@ fn attention_backward(
                             * scale,
                         )
 
-                    vectorize[_op2, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](
-                        size=hs
-                    )
+                    vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](hs, _op2)
 
     parallelize[_calc](B)
 
 
-fn gelu_forward(
-    vout: UnsafePointer[Scalar[dtype]],
-    inp: UnsafePointer[Scalar[dtype]],
+def gelu_forward(
+    vout: FloatPtr,
+    inp: FloatPtr,
     N: Int,
 ):
     var s: FLOAT = sqrt(2.0 / M_PI)
@@ -621,33 +591,31 @@ fn gelu_forward(
     var num_vectorize = N // NUM_PARALLELIZE
 
     @parameter
-    fn _calc(ip: Int):
-        @parameter
-        fn _op[width: Int](_iv: Int):
+    def _calc(ip: Int):
+        def _op[width: Int](_iv: Int) {ip, num_vectorize, inp, s, vout}:
             var iv = ip * num_vectorize + _iv
 
             var x = inp.load[width=width](iv)
             var cube = 0.044715 * pow(x, 3)
             vout.store(iv, 0.5 * x * (1.0 + tanh(s * (x + cube))))
 
-        vectorize[_op, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](num_vectorize)
+        vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](num_vectorize, _op)
 
     parallelize[_calc](NUM_PARALLELIZE)
 
 
-fn gelu_backward(
-    dinp: UnsafePointer[Scalar[dtype]],
-    inp: UnsafePointer[Scalar[dtype]],
-    dout: UnsafePointer[Scalar[dtype]],
+def gelu_backward(
+    dinp: FloatPtr,
+    inp: FloatPtr,
+    dout: FloatPtr,
     N: Int,
 ):
     var s: FLOAT = sqrt(2.0 / M_PI)
     var num_vectorize = N // NUM_PARALLELIZE
 
     @parameter
-    fn _calc(ip: Int):
-        @parameter
-        fn _op[width: Int](_iv: Int):
+    def _calc(ip: Int):
+        def _op[width: Int](_iv: Int) {ip, num_vectorize, inp, s, dinp, dout}:
             var iv = ip * num_vectorize + _iv
 
             var x = inp.load[width=width](iv)
@@ -665,45 +633,43 @@ fn gelu_backward(
                 + local_grad * dout.load[width=width](iv),
             )
 
-        vectorize[_op, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](num_vectorize)
+        vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](num_vectorize, _op)
 
     parallelize[_calc](NUM_PARALLELIZE)
 
 
-fn residual_forward(
-    vout: UnsafePointer[Scalar[dtype]],
-    inp1: UnsafePointer[Scalar[dtype]],
-    inp2: UnsafePointer[Scalar[dtype]],
+def residual_forward(
+    vout: FloatPtr,
+    inp1: FloatPtr,
+    inp2: FloatPtr,
     N: Int,
 ):
     var num_vectorize = N // NUM_PARALLELIZE
 
     @parameter
-    fn _calc(ip: Int):
-        @parameter
-        fn _op[width: Int](_iv: Int):
+    def _calc(ip: Int):
+        def _op[width: Int](_iv: Int) {ip, num_vectorize, vout, inp1, inp2}:
             var iv = ip * num_vectorize + _iv
             vout.store(
                 iv, inp1.load[width=width](iv) + inp2.load[width=width](iv)
             )  # scale and shift it
 
-        vectorize[_op, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](num_vectorize)
+        vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](num_vectorize, _op)
 
     parallelize[_calc](NUM_PARALLELIZE)
 
 
-fn residual_backward(
-    dinp1: UnsafePointer[Scalar[dtype]],
-    dinp2: UnsafePointer[Scalar[dtype]],
-    dout: UnsafePointer[Scalar[dtype]],
+def residual_backward(
+    dinp1: FloatPtr,
+    dinp2: FloatPtr,
+    dout: FloatPtr,
     N: Int,
 ):
     var num_vectorize = N // NUM_PARALLELIZE
 
     @parameter
-    fn _calc(ip: Int):
-        @parameter
-        fn _op[width: Int](_iv: Int):
+    def _calc(ip: Int):
+        def _op[width: Int](_iv: Int) {ip, num_vectorize, dinp1, dinp2, dout}:
             var iv = ip * num_vectorize + _iv
 
             dinp1.store(
@@ -713,14 +679,14 @@ fn residual_backward(
                 iv, dinp2.load[width=width](iv) + dout.load[width=width](iv)
             )  # scale and shift it
 
-        vectorize[_op, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](num_vectorize)
+        vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](num_vectorize, _op)
 
     parallelize[_calc](NUM_PARALLELIZE)
 
 
-fn softmax_forward(
-    probs: UnsafePointer[Scalar[dtype]],
-    logits: UnsafePointer[Scalar[dtype]],
+def softmax_forward(
+    probs: FloatPtr,
+    logits: FloatPtr,
     B: Int,
     T: Int,
     V: Int,
@@ -732,40 +698,38 @@ fn softmax_forward(
     # example: Vp is 50304 and V is 50257
 
     @parameter
-    fn _calc(b: Int):
+    def _calc(b: Int):
         # for b in range(B):
         for t in range(T):
             # probs <- softmax(logits)
-            var logits_bt: UnsafePointer[Scalar[dtype]] = (
+            var logits_bt: FloatPtr = (
                 logits + b * T * Vp + t * Vp
             )
-            var probs_bt: UnsafePointer[Scalar[dtype]] = (
+            var probs_bt: FloatPtr = (
                 probs + b * T * Vp + t * Vp
             )
 
-            var maxval: FLOAT = -10000.0  # TODO something better
+            var maxval: FLOAT = FLOAT.MIN_FINITE
             for i in range(V):
                 if logits_bt[i] > maxval:
                     maxval = logits_bt[i]
 
             var sum: FLOAT = 0.0
 
-            @parameter
-            fn _op[width: Int](iv: Int):
+            def _op[width: Int](iv: Int) {probs_bt, logits_bt, maxval, mut sum}:
                 probs_bt.store(
                     iv, exp(logits_bt.load[width=width](iv) - maxval)
                 )
                 sum += probs_bt.load[width=width](iv).reduce_add[1]()
 
-            vectorize[_op, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](size=V)
+            vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](V, _op)
 
-            @parameter
-            fn _op2[width: Int](iv: Int):
+            def _op2[width: Int](iv: Int) {probs_bt, sum}:
                 probs_bt.store(
                     iv, probs_bt.load[width=width](iv) / sum
                 )  # scale and shift it
 
-            vectorize[_op2, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](size=V)
+            vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](V, _op2)
 
             # for extra super safety we may wish to include this too,
             # forcing the probabilities here to be zero, but it shouldn't matter
@@ -775,10 +739,10 @@ fn softmax_forward(
     parallelize[_calc](B)
 
 
-fn crossentropy_forward(
-    losses: UnsafePointer[Scalar[dtype]],
-    probs: UnsafePointer[Scalar[dtype]],
-    targets: UnsafePointer[Scalar[dtype_int]],
+def crossentropy_forward(
+    losses: FloatPtr,
+    probs: FloatPtr,
+    targets: IntPtr,
     B: Int,
     T: Int,
     Vp: Int,
@@ -788,10 +752,10 @@ fn crossentropy_forward(
     # input: targets is (B,T) of integers giving the correct index in logits
 
     @parameter
-    fn _calc(b: Int):
+    def _calc(b: Int):
         for t in range(T):  # todo
             # loss = -log(probs[target])
-            var probs_bt: UnsafePointer[Scalar[dtype]] = (
+            var probs_bt: FloatPtr = (
                 probs + b * T * Vp + t * Vp
             )
             var ix = targets[b * T + t]
@@ -800,11 +764,11 @@ fn crossentropy_forward(
     parallelize[_calc](B)
 
 
-fn crossentropy_softmax_backward(
-    dlogits: UnsafePointer[Scalar[dtype]],
-    dlosses: UnsafePointer[Scalar[dtype]],
-    probs: UnsafePointer[Scalar[dtype]],
-    targets: UnsafePointer[Scalar[dtype_int]],
+def crossentropy_softmax_backward(
+    dlogits: FloatPtr,
+    dlosses: FloatPtr,
+    probs: FloatPtr,
+    targets: IntPtr,
     B: Int,
     T: Int,
     V: Int,
@@ -813,28 +777,27 @@ fn crossentropy_softmax_backward(
     # backwards through both softmax and crossentropy
 
     @parameter
-    fn _calc(b: Int):
+    def _calc(b: Int):
         for t in range(T):
-            var dlogits_bt: UnsafePointer[Scalar[dtype]] = (
+            var dlogits_bt: FloatPtr = (
                 dlogits + b * T * Vp + t * Vp
             )
-            var probs_bt: UnsafePointer[Scalar[dtype]] = (
+            var probs_bt: FloatPtr = (
                 probs + b * T * Vp + t * Vp
             )
             var dloss: FLOAT = dlosses[b * T + t]
             var ix = targets[b * T + t]
 
-            @parameter
-            fn _op[width: Int](iv: Int):
+            def _op[width: Int](iv: Int) {dlogits_bt, probs_bt, dloss}:
                 dlogits_bt.store(
                     iv,
                     dlogits_bt.load[width=width](iv)
                     + probs_bt.load[width=width](iv) * dloss,
                 )
 
-            vectorize[_op, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](size=V)
+            vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](V, _op)
 
-            if ix >= 0 and ix < V:
+            if ix >= 0 and ix < INT(V):
                 dlogits_bt.store(ix, dlogits_bt.load(ix) - dloss)
 
     parallelize[_calc](B)
@@ -845,193 +808,165 @@ fn crossentropy_softmax_backward(
 
 # the parameters of the model
 
-alias NUM_PARAMETER_TENSORS = 16
+comptime NUM_PARAMETER_TENSORS = 16
 
 
-struct ParameterTensors:
-    var params_memory: UnsafePointer[Scalar[dtype]]
+struct ParameterTensors(Copyable, Movable):
+    var params_memory: FloatPtr
 
-    var wte: UnsafePointer[Scalar[dtype]]  # (V, C)
-    var wpe: UnsafePointer[Scalar[dtype]]  # (maxT, C)
-    var ln1w: UnsafePointer[Scalar[dtype]]  # (L, C)
-    var ln1b: UnsafePointer[Scalar[dtype]]  # (L, C)
-    var qkvw: UnsafePointer[Scalar[dtype]]  # (L, 3*C, C)
-    var qkvb: UnsafePointer[Scalar[dtype]]  # (L, 3*C)
-    var attprojw: UnsafePointer[Scalar[dtype]]  # (L, C, C)
-    var attprojb: UnsafePointer[Scalar[dtype]]  # (L, C)
-    var ln2w: UnsafePointer[Scalar[dtype]]  # (L, C)
-    var ln2b: UnsafePointer[Scalar[dtype]]  # (L, C)
-    var fcw: UnsafePointer[Scalar[dtype]]  # (L, 4*C, C)
-    var fcb: UnsafePointer[Scalar[dtype]]  # (L, 4*C)
-    var fcprojw: UnsafePointer[Scalar[dtype]]  # (L, C, 4*C)
-    var fcprojb: UnsafePointer[Scalar[dtype]]  # (L, C)
-    var lnfw: UnsafePointer[Scalar[dtype]]  # (C)
-    var lnfb: UnsafePointer[Scalar[dtype]]  # (C)
+    var wte: FloatPtr  # (V, C)
+    var wpe: FloatPtr  # (maxT, C)
+    var ln1w: FloatPtr  # (L, C)
+    var ln1b: FloatPtr  # (L, C)
+    var qkvw: FloatPtr  # (L, 3*C, C)
+    var qkvb: FloatPtr  # (L, 3*C)
+    var attprojw: FloatPtr  # (L, C, C)
+    var attprojb: FloatPtr  # (L, C)
+    var ln2w: FloatPtr  # (L, C)
+    var ln2b: FloatPtr  # (L, C)
+    var fcw: FloatPtr  # (L, 4*C, C)
+    var fcb: FloatPtr  # (L, 4*C)
+    var fcprojw: FloatPtr  # (L, C, 4*C)
+    var fcprojb: FloatPtr  # (L, C)
+    var lnfw: FloatPtr  # (C)
+    var lnfb: FloatPtr  # (C)
 
-    fn __init__(out self):
-        self.params_memory = UnsafePointer[Scalar[dtype]]()
-
-        self.wte = UnsafePointer[Scalar[dtype]]()
-        self.wpe = UnsafePointer[Scalar[dtype]]()
-        self.ln1w = UnsafePointer[Scalar[dtype]]()
-        self.ln1b = UnsafePointer[Scalar[dtype]]()
-        self.qkvw = UnsafePointer[Scalar[dtype]]()
-        self.qkvb = UnsafePointer[Scalar[dtype]]()
-        self.attprojw = UnsafePointer[Scalar[dtype]]()
-        self.attprojb = UnsafePointer[Scalar[dtype]]()
-        self.ln2w = UnsafePointer[Scalar[dtype]]()
-        self.ln2b = UnsafePointer[Scalar[dtype]]()
-        self.fcw = UnsafePointer[Scalar[dtype]]()
-        self.fcb = UnsafePointer[Scalar[dtype]]()
-        self.fcprojw = UnsafePointer[Scalar[dtype]]()
-        self.fcprojb = UnsafePointer[Scalar[dtype]]()
-        self.lnfw = UnsafePointer[Scalar[dtype]]()
-        self.lnfb = UnsafePointer[Scalar[dtype]]()
-
-    fn alloc_and_point_parameters(
-        mut self,
+    def __init__(
+        out self,
         param_sizes: InlineArray[Int, NUM_PARAMETER_TENSORS],
-    ) -> UnsafePointer[Scalar[dtype]]:
+    ):
         var num_parameters: Int = 0
 
         for i in range(NUM_PARAMETER_TENSORS):
             num_parameters += param_sizes[i]
 
         # malloc all parameters all at once
-        self.params_memory = UnsafePointer[Scalar[dtype]]().alloc(
-            num_parameters
-        )
+        self.params_memory = alloc[Scalar[dtype]](num_parameters)
+
         # assign all the tensors
+        var it: FloatPtr = self.params_memory
+        self.wte = it
+        it += param_sizes[0]
+        self.wpe = it
+        it += param_sizes[1]
+        self.ln1w = it
+        it += param_sizes[2]
+        self.ln1b = it
+        it += param_sizes[3]
+        self.qkvw = it
+        it += param_sizes[4]
+        self.qkvb = it
+        it += param_sizes[5]
+        self.attprojw = it
+        it += param_sizes[6]
+        self.attprojb = it
+        it += param_sizes[7]
+        self.ln2w = it
+        it += param_sizes[8]
+        self.ln2b = it
+        it += param_sizes[9]
+        self.fcw = it
+        it += param_sizes[10]
+        self.fcb = it
+        it += param_sizes[11]
+        self.fcprojw = it
+        it += param_sizes[12]
+        self.fcprojb = it
+        it += param_sizes[13]
+        self.lnfw = it
+        it += param_sizes[14]
+        self.lnfb = it
 
-        var ptrs = List[UnsafePointer[UnsafePointer[Scalar[dtype]]]](
-            UnsafePointer(to=self.wte),
-            UnsafePointer(to=self.wpe),
-            UnsafePointer(to=self.ln1w),
-            UnsafePointer(to=self.ln1b),
-            UnsafePointer(to=self.qkvw),
-            UnsafePointer(to=self.qkvb),
-            UnsafePointer(to=self.attprojw),
-            UnsafePointer(to=self.attprojb),
-            UnsafePointer(to=self.ln2w),
-            UnsafePointer(to=self.ln2b),
-            UnsafePointer(to=self.fcw),
-            UnsafePointer(to=self.fcb),
-            UnsafePointer(to=self.fcprojw),
-            UnsafePointer(to=self.fcprojb),
-            UnsafePointer(to=self.lnfw),
-            UnsafePointer(to=self.lnfb),
-        )
 
-        var params_memory_iterator: UnsafePointer[
-            Scalar[dtype]
-        ] = self.params_memory
-
-        for i in range(NUM_PARAMETER_TENSORS):
-            ptrs[i][] = params_memory_iterator
-            params_memory_iterator += param_sizes[i]
-
-        return self.params_memory
+comptime NUM_ACTIVATION_TENSORS = 23
 
 
-alias NUM_ACTIVATION_TENSORS = 23
+struct ActivationTensors(Copyable, Movable):
+    var acts_memory: FloatPtr
 
+    var encoded: FloatPtr  # (B, T, C)
+    var ln1: FloatPtr  # (L, B, T, C)
+    var ln1_mean: FloatPtr  # (L, B, T)
+    var ln1_rstd: FloatPtr  # (L, B, T)
+    var qkv: FloatPtr  # (L, B, T, 3*C)
+    var atty: FloatPtr  # (L, B, T, C)
+    var preatt: FloatPtr  # (L, B, NH, T, T)
+    var att: FloatPtr  # (L, B, NH, T, T)
+    var attproj: FloatPtr  # (L, B, T, C)
+    var residual2: FloatPtr  # (L, B, T, C)
+    var ln2: FloatPtr  # (L, B, T, C)
+    var ln2_mean: FloatPtr  # (L, B, T)
+    var ln2_rstd: FloatPtr  # (L, B, T)
+    var fch: FloatPtr  # (L, B, T, 4*C)
+    var fch_gelu: FloatPtr  # (L, B, T, 4*C)
+    var fcproj: FloatPtr  # (L, B, T, C)
+    var residual3: FloatPtr  # (L, B, T, C)
+    var lnf: FloatPtr  # (B, T, C)
+    var lnf_mean: FloatPtr  # (B, T)
+    var lnf_rstd: FloatPtr  # (B, T)
+    var logits: FloatPtr  # (B, T, V)
+    var probs: FloatPtr  # (B, T, V)
+    var losses: FloatPtr  # (B, T)
 
-@fieldwise_init
-struct ActivationTensors:
-    var encoded: UnsafePointer[Scalar[dtype]]  # (B, T, C)
-    var ln1: UnsafePointer[Scalar[dtype]]  # (L, B, T, C)
-    var ln1_mean: UnsafePointer[Scalar[dtype]]  # (L, B, T)
-    var ln1_rstd: UnsafePointer[Scalar[dtype]]  # (L, B, T)
-    var qkv: UnsafePointer[Scalar[dtype]]  # (L, B, T, 3*C)
-    var atty: UnsafePointer[Scalar[dtype]]  # (L, B, T, C)
-    var preatt: UnsafePointer[Scalar[dtype]]  # (L, B, NH, T, T)
-    var att: UnsafePointer[Scalar[dtype]]  # (L, B, NH, T, T)
-    var attproj: UnsafePointer[Scalar[dtype]]  # (L, B, T, C)
-    var residual2: UnsafePointer[Scalar[dtype]]  # (L, B, T, C)
-    var ln2: UnsafePointer[Scalar[dtype]]  # (L, B, T, C)
-    var ln2_mean: UnsafePointer[Scalar[dtype]]  # (L, B, T)
-    var ln2_rstd: UnsafePointer[Scalar[dtype]]  # (L, B, T)
-    var fch: UnsafePointer[Scalar[dtype]]  # (L, B, T, 4*C)
-    var fch_gelu: UnsafePointer[Scalar[dtype]]  # (L, B, T, 4*C)
-    var fcproj: UnsafePointer[Scalar[dtype]]  # (L, B, T, C)
-    var residual3: UnsafePointer[Scalar[dtype]]  # (L, B, T, C)
-    var lnf: UnsafePointer[Scalar[dtype]]  # (B, T, C)
-    var lnf_mean: UnsafePointer[Scalar[dtype]]  # (B, T)
-    var lnf_rstd: UnsafePointer[Scalar[dtype]]  # (B, T)
-    var logits: UnsafePointer[Scalar[dtype]]  # (B, T, V)
-    var probs: UnsafePointer[Scalar[dtype]]  # (B, T, V)
-    var losses: UnsafePointer[Scalar[dtype]]  # (B, T)
-
-    fn __init__(
+    def __init__(
         out self,
-    ):
-        self.encoded = UnsafePointer[Scalar[dtype]]()
-        self.ln1 = UnsafePointer[Scalar[dtype]]()
-        self.ln1_mean = UnsafePointer[Scalar[dtype]]()
-        self.ln1_rstd = UnsafePointer[Scalar[dtype]]()
-        self.qkv = UnsafePointer[Scalar[dtype]]()
-        self.atty = UnsafePointer[Scalar[dtype]]()
-        self.preatt = UnsafePointer[Scalar[dtype]]()
-        self.att = UnsafePointer[Scalar[dtype]]()
-        self.attproj = UnsafePointer[Scalar[dtype]]()
-        self.residual2 = UnsafePointer[Scalar[dtype]]()
-        self.ln2 = UnsafePointer[Scalar[dtype]]()
-        self.ln2_mean = UnsafePointer[Scalar[dtype]]()
-        self.ln2_rstd = UnsafePointer[Scalar[dtype]]()
-        self.fch = UnsafePointer[Scalar[dtype]]()
-        self.fch_gelu = UnsafePointer[Scalar[dtype]]()
-        self.fcproj = UnsafePointer[Scalar[dtype]]()
-        self.residual3 = UnsafePointer[Scalar[dtype]]()
-        self.lnf = UnsafePointer[Scalar[dtype]]()
-        self.lnf_mean = UnsafePointer[Scalar[dtype]]()
-        self.lnf_rstd = UnsafePointer[Scalar[dtype]]()
-        self.logits = UnsafePointer[Scalar[dtype]]()
-        self.probs = UnsafePointer[Scalar[dtype]]()
-        self.losses = UnsafePointer[Scalar[dtype]]()
-
-    fn alloc_and_point_activations(
-        self,
         act_sizes: InlineArray[Int, NUM_ACTIVATION_TENSORS],
-    ) -> UnsafePointer[Scalar[dtype]]:
-        var ptrs = List[UnsafePointer[UnsafePointer[Scalar[dtype]]]](
-            UnsafePointer(to=self.encoded),
-            UnsafePointer(to=self.ln1),
-            UnsafePointer(to=self.ln1_mean),
-            UnsafePointer(to=self.ln1_rstd),
-            UnsafePointer(to=self.qkv),
-            UnsafePointer(to=self.atty),
-            UnsafePointer(to=self.preatt),
-            UnsafePointer(to=self.att),
-            UnsafePointer(to=self.attproj),
-            UnsafePointer(to=self.residual2),
-            UnsafePointer(to=self.ln2),
-            UnsafePointer(to=self.ln2_mean),
-            UnsafePointer(to=self.ln2_rstd),
-            UnsafePointer(to=self.fch),
-            UnsafePointer(to=self.fch_gelu),
-            UnsafePointer(to=self.fcproj),
-            UnsafePointer(to=self.residual3),
-            UnsafePointer(to=self.lnf),
-            UnsafePointer(to=self.lnf_mean),
-            UnsafePointer(to=self.lnf_rstd),
-            UnsafePointer(to=self.logits),
-            UnsafePointer(to=self.probs),
-            UnsafePointer(to=self.losses),
-        )
-
+    ):
         var num_activations: Int = 0
 
         for i in range(NUM_ACTIVATION_TENSORS):
             num_activations += act_sizes[i]
 
-        var acts_memory = UnsafePointer[Scalar[dtype]]().alloc(num_activations)
+        # malloc all activations all at once
+        self.acts_memory = alloc[Scalar[dtype]](num_activations)
 
-        var acts_memory_iterator: UnsafePointer[Scalar[dtype]] = acts_memory
-        for i in range(NUM_ACTIVATION_TENSORS):
-            ptrs[i][] = acts_memory_iterator
-            acts_memory_iterator += act_sizes[i]
-
-        return acts_memory
+        # assign all the tensors
+        var it: FloatPtr = self.acts_memory
+        self.encoded = it
+        it += act_sizes[0]
+        self.ln1 = it
+        it += act_sizes[1]
+        self.ln1_mean = it
+        it += act_sizes[2]
+        self.ln1_rstd = it
+        it += act_sizes[3]
+        self.qkv = it
+        it += act_sizes[4]
+        self.atty = it
+        it += act_sizes[5]
+        self.preatt = it
+        it += act_sizes[6]
+        self.att = it
+        it += act_sizes[7]
+        self.attproj = it
+        it += act_sizes[8]
+        self.residual2 = it
+        it += act_sizes[9]
+        self.ln2 = it
+        it += act_sizes[10]
+        self.ln2_mean = it
+        it += act_sizes[11]
+        self.ln2_rstd = it
+        it += act_sizes[12]
+        self.fch = it
+        it += act_sizes[13]
+        self.fch_gelu = it
+        it += act_sizes[14]
+        self.fcproj = it
+        it += act_sizes[15]
+        self.residual3 = it
+        it += act_sizes[16]
+        self.lnf = it
+        it += act_sizes[17]
+        self.lnf_mean = it
+        it += act_sizes[18]
+        self.lnf_rstd = it
+        it += act_sizes[19]
+        self.logits = it
+        it += act_sizes[20]
+        self.probs = it
+        it += act_sizes[21]
+        self.losses = it
 
 
 @fieldwise_init
@@ -1049,35 +984,28 @@ struct GPT2:
     # the weights of the model, and their sizes
     var params: ParameterTensors
     var param_sizes: InlineArray[Int, NUM_PARAMETER_TENSORS]
-    var params_memory: UnsafePointer[Scalar[dtype]]
+    var params_memory: FloatPtr
     var num_parameters: Int
-    # gradients of the weights
-    var grads: ParameterTensors
-    var grads_memory: UnsafePointer[Scalar[dtype]]
-    # buffers for the AdamW optimizer
-    var m_memory: UnsafePointer[Scalar[dtype]]
-    var v_memory: UnsafePointer[Scalar[dtype]]
-    # the activations of the model, and their sizes
-    var acts: ActivationTensors
+    # gradients of the weights (lazily allocated in backward)
+    var grads: Optional[ParameterTensors]
+    # buffers for the AdamW optimizer (lazily allocated in update)
+    var m_memory: Optional[FloatPtr]
+    var v_memory: Optional[FloatPtr]
+    # the activations of the model, and their sizes (lazily allocated in forward)
+    var acts: Optional[ActivationTensors]
     var act_sizes: InlineArray[Int, NUM_ACTIVATION_TENSORS]
-    var acts_memory: UnsafePointer[Scalar[dtype]]
     var num_activations: Int
-    # gradients of the activations
-    var grads_acts: ActivationTensors
-    var grads_acts_memory: UnsafePointer[Scalar[dtype]]
+    # gradients of the activations (lazily allocated in backward)
+    var grads_acts: Optional[ActivationTensors]
     # other run state configuration
     var batch_size: Int  # the batch size (B) of current forward pass
     var seq_len: Int  # the sequence length (T) of current forward pass
-    var inputs: UnsafePointer[
-        Scalar[dtype_int]
-    ]  # the input tokens for the current forward pass
-    var targets: UnsafePointer[
-        Scalar[dtype_int]
-    ]  # the target tokens for the current forward pass
+    var inputs: Optional[IntPtr]  # the input tokens for the current forward pass
+    var targets: Optional[IntPtr]  # the target tokens for the current forward pass
     var mean_loss: FLOAT  # after a forward pass with targets, will be populated with the mean loss
     var checkpoint_path: String
 
-    fn __init__(out self, checkpoint_path: String) raises:
+    def __init__(out self, checkpoint_path: String) raises:
         self.checkpoint_path = checkpoint_path
 
         self.param_sizes = InlineArray[Int, NUM_PARAMETER_TENSORS](fill=0)
@@ -1089,11 +1017,9 @@ struct GPT2:
         read_to_buf(model_header, model_file)
 
         if model_header[0] != 20240326:
-            print("Bad magic model file", model_header[0])
-            exit(1)
+            raise Error(t"Bad magic model file {model_header[0]}")
         if model_header[1] != 3:
-            print("Bad version in model file")
-            exit(1)
+            raise Error(t"Bad version in model file {model_header[1]}")
 
         # read in hyperparameters
 
@@ -1107,9 +1033,7 @@ struct GPT2:
         )
 
         var maxT: Int = self.config.max_seq_len
-        var V: Int = self.config.vocab_size
         var L: Int = self.config.num_layers
-        var NH: Int = self.config.num_heads
         var C: Int = self.config.channels
         var Vp: Int = self.config.padded_vocab_size
 
@@ -1140,33 +1064,27 @@ struct GPT2:
         self.num_parameters = num_parameters
 
         # read in all the parameters from file
-        self.params = ParameterTensors()
-        self.params_memory = self.params.alloc_and_point_parameters(
-            self.param_sizes
-        )
+        self.params = ParameterTensors(self.param_sizes)
+        self.params_memory = self.params.params_memory
 
         read_to_dtype_pointer[DType.float32](
             self.params_memory, model_file, num_parameters
         )
         model_file.close()
 
-        # other inits
-        self.acts = ActivationTensors()
+        # other inits (lazily allocated later)
+        self.acts = None
         self.num_activations = 0  # for now
 
-        self.acts_memory = NULL
-        self.grads_memory = NULL
-        self.m_memory = NULL
-        self.v_memory = NULL
-        self.grads_acts_memory = NULL
-        self.inputs = NULL_INT
-        self.targets = NULL_INT
+        self.grads = None
+        self.grads_acts = None
+        self.m_memory = None
+        self.v_memory = None
+        self.inputs = None
+        self.targets = None
         self.batch_size = 0
         self.seq_len = 0
         self.mean_loss = -1.0  # -1.0 will designate no loss
-
-        self.grads = ParameterTensors()
-        self.grads_acts = ActivationTensors()
 
         print("[GPT-2]")
         print("max_seq_len:", self.config.max_seq_len)
@@ -1179,577 +1097,580 @@ struct GPT2:
         print("num_parameters:", num_parameters)
 
 
-fn gpt2_forward(
-    mut model: GPT2,
-    inputs: UnsafePointer[Scalar[dtype_int]],
-    targets: UnsafePointer[Scalar[dtype_int]],
-    B: Int,
-    T: Int,
-):
-    # targets are optional and could be NULL
+    def forward(
+        mut self,
+        inputs: IntPtr,
+        targets: Optional[IntPtr],
+        B: Int,
+        T: Int,
+    ):
+        # targets are optional and could be None
 
-    # ensure the model was initialized or error out
-    if model.params_memory == NULL:
-        print("Error: model was not initialized properly.")
+        # convenience parameters
+        var V: Int = self.config.vocab_size
+        var Vp: Int = self.config.padded_vocab_size
+        var L: Int = self.config.num_layers
+        var NH: Int = self.config.num_heads
+        var C: Int = self.config.channels
 
-    # convenience parameters
-    var V: Int = model.config.vocab_size
-    var Vp: Int = model.config.padded_vocab_size
-    var L: Int = model.config.num_layers
-    var NH: Int = model.config.num_heads
-    var C: Int = model.config.channels
+        # allocate space for all the activations if needed (done here, lazily)
+        if not self.acts:
+            # record the current B,T as well
+            self.batch_size = B
+            self.seq_len = T
 
-    # allocate space for all the activations if needed (done here, lazily)
-    if model.acts_memory == NULL:
-        # record the current B,T as well
-        model.batch_size = B
-        model.seq_len = T
+            # and now allocate the space
+            self.act_sizes[0] = B * T * C
+            self.act_sizes[1] = L * B * T * C
+            self.act_sizes[2] = L * B * T
+            self.act_sizes[3] = L * B * T
+            self.act_sizes[4] = L * B * T * 3 * C
+            self.act_sizes[5] = L * B * T * C
+            self.act_sizes[6] = L * B * NH * T * T
+            self.act_sizes[7] = L * B * NH * T * T
+            self.act_sizes[8] = L * B * T * C
+            self.act_sizes[9] = L * B * T * C
+            self.act_sizes[10] = L * B * T * C
+            self.act_sizes[11] = L * B * T
+            self.act_sizes[12] = L * B * T
+            self.act_sizes[13] = L * B * T * 4 * C
+            self.act_sizes[14] = L * B * T * 4 * C
+            self.act_sizes[15] = L * B * T * C
+            self.act_sizes[16] = L * B * T * C
+            self.act_sizes[17] = B * T * C
+            self.act_sizes[18] = B * T
+            self.act_sizes[19] = B * T
+            self.act_sizes[20] = B * T * Vp
+            self.act_sizes[21] = B * T * Vp
+            self.act_sizes[22] = B * T
 
-        # and now allocate the space
-        model.act_sizes[0] = B * T * C
-        model.act_sizes[1] = L * B * T * C
-        model.act_sizes[2] = L * B * T
-        model.act_sizes[3] = L * B * T
-        model.act_sizes[4] = L * B * T * 3 * C
-        model.act_sizes[5] = L * B * T * C
-        model.act_sizes[6] = L * B * NH * T * T
-        model.act_sizes[7] = L * B * NH * T * T
-        model.act_sizes[8] = L * B * T * C
-        model.act_sizes[9] = L * B * T * C
-        model.act_sizes[10] = L * B * T * C
-        model.act_sizes[11] = L * B * T
-        model.act_sizes[12] = L * B * T
-        model.act_sizes[13] = L * B * T * 4 * C
-        model.act_sizes[14] = L * B * T * 4 * C
-        model.act_sizes[15] = L * B * T * C
-        model.act_sizes[16] = L * B * T * C
-        model.act_sizes[17] = B * T * C
-        model.act_sizes[18] = B * T
-        model.act_sizes[19] = B * T
-        model.act_sizes[20] = B * T * Vp
-        model.act_sizes[21] = B * T * Vp
-        model.act_sizes[22] = B * T
+            var num_activations: Int = 0
+            for i in range(NUM_ACTIVATION_TENSORS):
+                num_activations += self.act_sizes[i]
 
-        var num_activations: Int = 0
-        for i in range(NUM_ACTIVATION_TENSORS):
-            num_activations += model.act_sizes[i]
+            print("num_activations:", num_activations)
 
-        print("num_activations:", num_activations)
+            self.acts = ActivationTensors(self.act_sizes)
+            self.num_activations = num_activations
+            # also create memory for caching inputs and targets
 
-        model.acts_memory = model.acts.alloc_and_point_activations(
-            model.act_sizes
-        )
-        model.num_activations = num_activations
-        # also create memory for caching inputs and targets
+            self.inputs = alloc[Scalar[dtype_int]](B * T)
+            self.targets = alloc[Scalar[dtype_int]](B * T)
 
-        model.inputs = UnsafePointer[Scalar[dtype_int]]().alloc(B * T)
-        model.targets = UnsafePointer[Scalar[dtype_int]]().alloc(B * T)
+        else:
+            # validate B,T is no larger than what was previously allocated
+            # in principle, we could re-allocate a larger chunk of memory, for now we just error out
+            if B > self.batch_size or T > self.seq_len:
+                print("Error: batch size or sequence length is inadequately large")
+                # print("Model: B=%d T=%d, Desired: B=%d T=%d\n", self.batch_size, self.seq_len, B, T)
 
-    else:
-        # validate B,T is no larger than what was previously allocated
-        # in principle, we could re-allocate a larger chunk of memory, for now we just error out
-        if B > model.batch_size or T > model.seq_len:
-            print("Error: batch size or sequence length is inadequately large")
-            # print("Model: B=%d T=%d, Desired: B=%d T=%d\n", model.batch_size, model.seq_len, B, T)
+        # cache the inputs/targets
+        memcpy(dest=self.inputs.value(), src=inputs, count=B * T)
 
-    # cache the inputs/targets
-    memcpy(model.inputs, inputs, B * T)
+        if targets:
+            memcpy(dest=self.targets.value(), src=targets.value(), count=B * T)
 
-    if targets != NULL_INT:
-        memcpy(model.targets, targets, B * T)
+        # forward pass
 
-    # forward pass
+        ref acts = self.acts.value()
+        var residual: FloatPtr
+        encoder_forward(
+            acts.encoded, inputs, self.params.wte, self.params.wpe, B, T, C
+        )  # encoding goes into residual[0]
 
-    var residual: UnsafePointer[Scalar[dtype]]
-    encoder_forward(
-        model.acts.encoded, inputs, model.params.wte, model.params.wpe, B, T, C
-    )  # encoding goes into residual[0]
+        for l in range(L):
+            residual = acts.residual3 + (l - 1) * B * T * C
 
-    for l in range(L):
-        residual = model.acts.residual3 + (l - 1) * B * T * C
+            if l == 0:
+                residual = acts.encoded
 
-        if l == 0:
-            residual = model.acts.encoded
+            # get the pointers of the weights for this layer
+            var l_ln1w: FloatPtr = self.params.ln1w + l * C
+            var l_ln1b: FloatPtr = self.params.ln1b + l * C
+            var l_qkvw: FloatPtr = (
+                self.params.qkvw + l * 3 * C * C
+            )
+            var l_qkvb: FloatPtr = self.params.qkvb + l * 3 * C
+            var l_attprojw: FloatPtr = (
+                self.params.attprojw + l * C * C
+            )
+            var l_attprojb: FloatPtr = (
+                self.params.attprojb + l * C
+            )
+            var l_ln2w: FloatPtr = self.params.ln2w + l * C
+            var l_ln2b: FloatPtr = self.params.ln2b + l * C
+            var l_fcw: FloatPtr = (
+                self.params.fcw + l * 4 * C * C
+            )
+            var l_fcb: FloatPtr = self.params.fcb + l * 4 * C
+            var l_fcprojw: FloatPtr = (
+                self.params.fcprojw + l * C * 4 * C
+            )
+            var l_fcprojb: FloatPtr = (
+                self.params.fcprojb + l * C
+            )
 
-        # get the pointers of the weights for this layer
-        var l_ln1w: UnsafePointer[Scalar[dtype]] = model.params.ln1w + l * C
-        var l_ln1b: UnsafePointer[Scalar[dtype]] = model.params.ln1b + l * C
-        var l_qkvw: UnsafePointer[Scalar[dtype]] = (
-            model.params.qkvw + l * 3 * C * C
-        )
-        var l_qkvb: UnsafePointer[Scalar[dtype]] = model.params.qkvb + l * 3 * C
-        var l_attprojw: UnsafePointer[Scalar[dtype]] = (
-            model.params.attprojw + l * C * C
-        )
-        var l_attprojb: UnsafePointer[Scalar[dtype]] = (
-            model.params.attprojb + l * C
-        )
-        var l_ln2w: UnsafePointer[Scalar[dtype]] = model.params.ln2w + l * C
-        var l_ln2b: UnsafePointer[Scalar[dtype]] = model.params.ln2b + l * C
-        var l_fcw: UnsafePointer[Scalar[dtype]] = (
-            model.params.fcw + l * 4 * C * C
-        )
-        var l_fcb: UnsafePointer[Scalar[dtype]] = model.params.fcb + l * 4 * C
-        var l_fcprojw: UnsafePointer[Scalar[dtype]] = (
-            model.params.fcprojw + l * C * 4 * C
-        )
-        var l_fcprojb: UnsafePointer[Scalar[dtype]] = (
-            model.params.fcprojb + l * C
-        )
+            # get the pointers of the activations for this layer
+            var l_ln1: FloatPtr = acts.ln1 + l * B * T * C
+            var l_ln1_mean: FloatPtr = (
+                acts.ln1_mean + l * B * T
+            )
+            var l_ln1_rstd: FloatPtr = (
+                acts.ln1_rstd + l * B * T
+            )
+            var l_qkv: FloatPtr = (
+                acts.qkv + l * B * T * 3 * C
+            )
+            var l_atty: FloatPtr = (
+                acts.atty + l * B * T * C
+            )
+            var l_preatt: FloatPtr = (
+                acts.preatt + l * B * NH * T * T
+            )
+            var l_att: FloatPtr = (
+                acts.att + l * B * NH * T * T
+            )
+            var l_attproj: FloatPtr = (
+                acts.attproj + l * B * T * C
+            )
+            var l_residual2: FloatPtr = (
+                acts.residual2 + l * B * T * C
+            )
+            var l_ln2: FloatPtr = acts.ln2 + l * B * T * C
+            var l_ln2_mean: FloatPtr = (
+                acts.ln2_mean + l * B * T
+            )
+            var l_ln2_rstd: FloatPtr = (
+                acts.ln2_rstd + l * B * T
+            )
+            var l_fch: FloatPtr = (
+                acts.fch + l * B * T * 4 * C
+            )
+            var l_fch_gelu: FloatPtr = (
+                acts.fch_gelu + l * B * T * 4 * C
+            )
+            var l_fcproj: FloatPtr = (
+                acts.fcproj + l * B * T * C
+            )
+            var l_residual3: FloatPtr = (
+                acts.residual3 + l * B * T * C
+            )
 
-        # get the pointers of the activations for this layer
-        var l_ln1: UnsafePointer[Scalar[dtype]] = model.acts.ln1 + l * B * T * C
-        var l_ln1_mean: UnsafePointer[Scalar[dtype]] = (
-            model.acts.ln1_mean + l * B * T
-        )
-        var l_ln1_rstd: UnsafePointer[Scalar[dtype]] = (
-            model.acts.ln1_rstd + l * B * T
-        )
-        var l_qkv: UnsafePointer[Scalar[dtype]] = (
-            model.acts.qkv + l * B * T * 3 * C
-        )
-        var l_atty: UnsafePointer[Scalar[dtype]] = (
-            model.acts.atty + l * B * T * C
-        )
-        var l_preatt: UnsafePointer[Scalar[dtype]] = (
-            model.acts.preatt + l * B * NH * T * T
-        )
-        var l_att: UnsafePointer[Scalar[dtype]] = (
-            model.acts.att + l * B * NH * T * T
-        )
-        var l_attproj: UnsafePointer[Scalar[dtype]] = (
-            model.acts.attproj + l * B * T * C
-        )
-        var l_residual2: UnsafePointer[Scalar[dtype]] = (
-            model.acts.residual2 + l * B * T * C
-        )
-        var l_ln2: UnsafePointer[Scalar[dtype]] = model.acts.ln2 + l * B * T * C
-        var l_ln2_mean: UnsafePointer[Scalar[dtype]] = (
-            model.acts.ln2_mean + l * B * T
-        )
-        var l_ln2_rstd: UnsafePointer[Scalar[dtype]] = (
-            model.acts.ln2_rstd + l * B * T
-        )
-        var l_fch: UnsafePointer[Scalar[dtype]] = (
-            model.acts.fch + l * B * T * 4 * C
-        )
-        var l_fch_gelu: UnsafePointer[Scalar[dtype]] = (
-            model.acts.fch_gelu + l * B * T * 4 * C
-        )
-        var l_fcproj: UnsafePointer[Scalar[dtype]] = (
-            model.acts.fcproj + l * B * T * C
-        )
-        var l_residual3: UnsafePointer[Scalar[dtype]] = (
-            model.acts.residual3 + l * B * T * C
-        )
+            # now do the forward pass
 
-        # now do the forward pass
+            layernorm_forward(
+                l_ln1, l_ln1_mean, l_ln1_rstd, residual, l_ln1w, l_ln1b, B, T, C
+            )
+            matmul_forward(l_qkv, l_ln1, l_qkvw, l_qkvb, B, T, C, 3 * C)
+            attention_forward(l_atty, l_preatt, l_att, l_qkv, B, T, C, NH)
+            matmul_forward(l_attproj, l_atty, l_attprojw, l_attprojb, B, T, C, C)
+            residual_forward(l_residual2, residual, l_attproj, B * T * C)
+            layernorm_forward(
+                l_ln2, l_ln2_mean, l_ln2_rstd, l_residual2, l_ln2w, l_ln2b, B, T, C
+            )
+            matmul_forward(l_fch, l_ln2, l_fcw, l_fcb, B, T, C, 4 * C)
+            gelu_forward(l_fch_gelu, l_fch, B * T * 4 * C)
+            matmul_forward(
+                l_fcproj, l_fch_gelu, l_fcprojw, l_fcprojb, B, T, 4 * C, C
+            )
+            residual_forward(l_residual3, l_residual2, l_fcproj, B * T * C)
 
+        residual = (
+            acts.residual3 + (L - 1) * B * T * C
+        )  # last residual is in residual3
         layernorm_forward(
-            l_ln1, l_ln1_mean, l_ln1_rstd, residual, l_ln1w, l_ln1b, B, T, C
+            acts.lnf,
+            acts.lnf_mean,
+            acts.lnf_rstd,
+            residual,
+            self.params.lnfw,
+            self.params.lnfb,
+            B,
+            T,
+            C,
         )
-        matmul_forward(l_qkv, l_ln1, l_qkvw, l_qkvb, B, T, C, 3 * C)
-        attention_forward(l_atty, l_preatt, l_att, l_qkv, B, T, C, NH)
-        matmul_forward(l_attproj, l_atty, l_attprojw, l_attprojb, B, T, C, C)
-        residual_forward(l_residual2, residual, l_attproj, B * T * C)
-        layernorm_forward(
-            l_ln2, l_ln2_mean, l_ln2_rstd, l_residual2, l_ln2w, l_ln2b, B, T, C
-        )
-        matmul_forward(l_fch, l_ln2, l_fcw, l_fcb, B, T, C, 4 * C)
-        gelu_forward(l_fch_gelu, l_fch, B * T * 4 * C)
         matmul_forward(
-            l_fcproj, l_fch_gelu, l_fcprojw, l_fcprojb, B, T, 4 * C, C
+            acts.logits, acts.lnf, self.params.wte, None, B, T, C, Vp
         )
-        residual_forward(l_residual3, l_residual2, l_fcproj, B * T * C)
+        softmax_forward(acts.probs, acts.logits, B, T, V, Vp)
 
-    residual = (
-        model.acts.residual3 + (L - 1) * B * T * C
-    )  # last residual is in residual3
-    layernorm_forward(
-        model.acts.lnf,
-        model.acts.lnf_mean,
-        model.acts.lnf_rstd,
-        residual,
-        model.params.lnfw,
-        model.params.lnfb,
-        B,
-        T,
-        C,
-    )
-    matmul_forward(
-        model.acts.logits, model.acts.lnf, model.params.wte, NULL, B, T, C, Vp
-    )
-    softmax_forward(model.acts.probs, model.acts.logits, B, T, V, Vp)
-
-    # also forward the cross-entropy loss function if we have the targets
-    if targets != NULL_INT:
-        crossentropy_forward(
-            model.acts.losses, model.acts.probs, targets, B, T, Vp
-        )
-        # for convenience also evaluate the mean loss
-        var mean_loss: FLOAT = 0.0
-        for i in range(B * T):
-            mean_loss += model.acts.losses[i]
-        mean_loss /= B * T
-        model.mean_loss = mean_loss
-    else:
-        # if we don't have targets, we don't have a loss
-        model.mean_loss = -1.0
+        # also forward the cross-entropy loss function if we have the targets
+        if targets:
+            crossentropy_forward(
+                acts.losses, acts.probs, targets.value(), B, T, Vp
+            )
+            # for convenience also evaluate the mean loss
+            var mean_loss: FLOAT = 0.0
+            for i in range(B * T):
+                mean_loss += acts.losses[i]
+            mean_loss /= FLOAT(B * T)
+            self.mean_loss = mean_loss
+        else:
+            # if we don't have targets, we don't have a loss
+            self.mean_loss = -1.0
 
 
-fn gpt2_zero_grad(mut model: GPT2):
-    if model.grads_memory != NULL:
-        memset_zero(model.grads_memory, model.num_parameters)
+    def zero_grad(mut self):
+        if self.grads:
+            memset_zero(self.grads.value().params_memory, self.num_parameters)
 
-    if model.grads_acts_memory != NULL:
-        memset_zero(model.grads_acts_memory, model.num_activations)
+        if self.grads_acts:
+            memset_zero(self.grads_acts.value().acts_memory, self.num_activations)
 
 
-fn gpt2_backward(mut model: GPT2):
-    # double check we forwarded previously, with targets
-    if model.mean_loss == -1.0:
-        print("Error: must forward with targets before backward\n")
+    def backward(mut self):
+        # double check we forwarded previously, with targets
+        if self.mean_loss == -1.0:
+            print("Error: must forward with targets before backward\n")
 
-    # lazily allocate the memory for gradients of the weights and activations, if needed
-    if model.grads_memory == NULL:
-        model.grads_memory = model.grads.alloc_and_point_parameters(
-            model.param_sizes
-        )
-        model.grads_acts_memory = model.grads_acts.alloc_and_point_activations(
-            model.act_sizes
-        )
-        gpt2_zero_grad(model)
+        # lazily allocate the memory for gradients of the weights and activations, if needed
+        if not self.grads:
+            self.grads = ParameterTensors(self.param_sizes)
+            self.grads_acts = ActivationTensors(self.act_sizes)
+            self.zero_grad()
 
-    # convenience shortcuts
-    var B: Int = model.batch_size
-    var T: Int = model.seq_len
-    var V: Int = model.config.vocab_size
-    var Vp: Int = model.config.padded_vocab_size
-    var L: Int = model.config.num_layers
-    var NH: Int = model.config.num_heads
-    var C: Int = model.config.channels
+        # convenience shortcuts
+        var B: Int = self.batch_size
+        var T: Int = self.seq_len
+        var V: Int = self.config.vocab_size
+        var Vp: Int = self.config.padded_vocab_size
+        var L: Int = self.config.num_layers
+        var NH: Int = self.config.num_heads
+        var C: Int = self.config.channels
 
-    # backward pass
+        # references to the (now guaranteed allocated) tensor structs
+        ref acts = self.acts.value()
+        ref grads = self.grads.value()
+        ref grads_acts = self.grads_acts.value()
 
-    # we kick off the chain rule by filling in dlosses with 1.0f/(B*T)
-    # technically this is a small, inline backward() pass of calculating
-    # total, final loss as the mean over all losses over all (B,T) positions in the batch
+        # backward pass
 
-    var dloss_mean: FLOAT = FLOAT(1.0) / (B * T)
+        # we kick off the chain rule by filling in dlosses with 1.0f/(B*T)
+        # technically this is a small, inline backward() pass of calculating
+        # total, final loss as the mean over all losses over all (B,T) positions in the batch
 
-    # Fill the gradient losses with the mean loss value
-    @parameter
-    fn _fill_losses[width: Int](i: Int):
-        model.grads_acts.losses.store[width=width](i, dloss_mean)
+        var dloss_mean: FLOAT = FLOAT(1.0) / FLOAT(B * T)
 
-    vectorize[_fill_losses, SIMD_WIDTH](B * T)
+        # Fill the gradient losses with the mean loss value
+        def _fill_losses[width: Int](i: Int) {grads_acts, dloss_mean}:
+            grads_acts.losses.store[width=width](i, dloss_mean)
 
-    crossentropy_softmax_backward(
-        model.grads_acts.logits,
-        model.grads_acts.losses,
-        model.acts.probs,
-        model.targets,
-        B,
-        T,
-        V,
-        Vp,
-    )
-    matmul_backward(
-        model.grads_acts.lnf,
-        model.grads.wte,
-        NULL,
-        model.grads_acts.logits,
-        model.acts.lnf,
-        model.params.wte,
-        B,
-        T,
-        C,
-        Vp,
-    )
-    var residual: UnsafePointer[Scalar[dtype]] = (
-        model.acts.residual3 + (L - 1) * B * T * C
-    )  # last layer's residual
-    var dresidual: UnsafePointer[Scalar[dtype]] = (
-        model.grads_acts.residual3 + (L - 1) * B * T * C
-    )  # write to last layer's residual
-    layernorm_backward(
-        dresidual,
-        model.grads.lnfw,
-        model.grads.lnfb,
-        model.grads_acts.lnf,
-        residual,
-        model.params.lnfw,
-        model.acts.lnf_mean,
-        model.acts.lnf_rstd,
-        B,
-        T,
-        C,
-    )
+        vectorize[SIMD_WIDTH](B * T, _fill_losses)
 
-    for l in range(L - 1, -1, -1):
-        var residual = model.acts.encoded
-        var dresidual = model.grads_acts.encoded
-        if l != 0:
-            residual = model.acts.residual3 + (l - 1) * B * T * C
-            dresidual = model.grads_acts.residual3 + (l - 1) * B * T * C
-
-        # get the pointers of the weights for this layer
-        var l_ln1w: UnsafePointer[Scalar[dtype]] = model.params.ln1w + l * C
-        var l_qkvw: UnsafePointer[Scalar[dtype]] = (
-            model.params.qkvw + l * 3 * C * C
-        )
-        var l_attprojw: UnsafePointer[Scalar[dtype]] = (
-            model.params.attprojw + l * C * C
-        )
-        var l_ln2w: UnsafePointer[Scalar[dtype]] = model.params.ln2w + l * C
-        var l_fcw: UnsafePointer[Scalar[dtype]] = (
-            model.params.fcw + l * 4 * C * C
-        )
-        var l_fcprojw: UnsafePointer[Scalar[dtype]] = (
-            model.params.fcprojw + l * C * 4 * C
-        )
-        # get the pointers of the gradients of the weights for this layer
-        var dl_ln1w: UnsafePointer[Scalar[dtype]] = model.grads.ln1w + l * C
-        var dl_ln1b: UnsafePointer[Scalar[dtype]] = model.grads.ln1b + l * C
-        var dl_qkvw: UnsafePointer[Scalar[dtype]] = (
-            model.grads.qkvw + l * 3 * C * C
-        )
-        var dl_qkvb: UnsafePointer[Scalar[dtype]] = model.grads.qkvb + l * 3 * C
-        var dl_attprojw: UnsafePointer[Scalar[dtype]] = (
-            model.grads.attprojw + l * C * C
-        )
-        var dl_attprojb: UnsafePointer[Scalar[dtype]] = (
-            model.grads.attprojb + l * C
-        )
-        var dl_ln2w: UnsafePointer[Scalar[dtype]] = model.grads.ln2w + l * C
-        var dl_ln2b: UnsafePointer[Scalar[dtype]] = model.grads.ln2b + l * C
-        var dl_fcw: UnsafePointer[Scalar[dtype]] = (
-            model.grads.fcw + l * 4 * C * C
-        )
-        var dl_fcb: UnsafePointer[Scalar[dtype]] = model.grads.fcb + l * 4 * C
-        var dl_fcprojw: UnsafePointer[Scalar[dtype]] = (
-            model.grads.fcprojw + l * C * 4 * C
-        )
-        var dl_fcprojb: UnsafePointer[Scalar[dtype]] = (
-            model.grads.fcprojb + l * C
-        )
-        # get the pointers of the activations for this layer
-        var l_ln1: UnsafePointer[Scalar[dtype]] = model.acts.ln1 + l * B * T * C
-        var l_ln1_mean: UnsafePointer[Scalar[dtype]] = (
-            model.acts.ln1_mean + l * B * T
-        )
-        var l_ln1_rstd: UnsafePointer[Scalar[dtype]] = (
-            model.acts.ln1_rstd + l * B * T
-        )
-        var l_qkv: UnsafePointer[Scalar[dtype]] = (
-            model.acts.qkv + l * B * T * 3 * C
-        )
-        var l_atty: UnsafePointer[Scalar[dtype]] = (
-            model.acts.atty + l * B * T * C
-        )
-        var l_att: UnsafePointer[Scalar[dtype]] = (
-            model.acts.att + l * B * NH * T * T
-        )
-        var l_residual2: UnsafePointer[Scalar[dtype]] = (
-            model.acts.residual2 + l * B * T * C
-        )
-        var l_ln2: UnsafePointer[Scalar[dtype]] = model.acts.ln2 + l * B * T * C
-        var l_ln2_mean: UnsafePointer[Scalar[dtype]] = (
-            model.acts.ln2_mean + l * B * T
-        )
-        var l_ln2_rstd: UnsafePointer[Scalar[dtype]] = (
-            model.acts.ln2_rstd + l * B * T
-        )
-        var l_fch: UnsafePointer[Scalar[dtype]] = (
-            model.acts.fch + l * B * T * 4 * C
-        )
-        var l_fch_gelu: UnsafePointer[Scalar[dtype]] = (
-            model.acts.fch_gelu + l * B * T * 4 * C
-        )
-        # get the pointers of the gradients of the activations for this layer
-        var dl_ln1: UnsafePointer[Scalar[dtype]] = (
-            model.grads_acts.ln1 + l * B * T * C
-        )
-        var dl_qkv: UnsafePointer[Scalar[dtype]] = (
-            model.grads_acts.qkv + l * B * T * 3 * C
-        )
-        var dl_atty: UnsafePointer[Scalar[dtype]] = (
-            model.grads_acts.atty + l * B * T * C
-        )
-        var dl_preatt: UnsafePointer[Scalar[dtype]] = (
-            model.grads_acts.preatt + l * B * NH * T * T
-        )
-        var dl_att: UnsafePointer[Scalar[dtype]] = (
-            model.grads_acts.att + l * B * NH * T * T
-        )
-        var dl_attproj: UnsafePointer[Scalar[dtype]] = (
-            model.grads_acts.attproj + l * B * T * C
-        )
-        var dl_residual2: UnsafePointer[Scalar[dtype]] = (
-            model.grads_acts.residual2 + l * B * T * C
-        )
-        var dl_ln2: UnsafePointer[Scalar[dtype]] = (
-            model.grads_acts.ln2 + l * B * T * C
-        )
-        var dl_fch: UnsafePointer[Scalar[dtype]] = (
-            model.grads_acts.fch + l * B * T * 4 * C
-        )
-        var dl_fch_gelu: UnsafePointer[Scalar[dtype]] = (
-            model.grads_acts.fch_gelu + l * B * T * 4 * C
-        )
-        var dl_fcproj: UnsafePointer[Scalar[dtype]] = (
-            model.grads_acts.fcproj + l * B * T * C
-        )
-        var dl_residual3: UnsafePointer[Scalar[dtype]] = (
-            model.grads_acts.residual3 + l * B * T * C
-        )
-
-        # backprop this layer
-        residual_backward(dl_residual2, dl_fcproj, dl_residual3, B * T * C)
-        matmul_backward(
-            dl_fch_gelu,
-            dl_fcprojw,
-            dl_fcprojb,
-            dl_fcproj,
-            l_fch_gelu,
-            l_fcprojw,
+        crossentropy_softmax_backward(
+            grads_acts.logits,
+            grads_acts.losses,
+            acts.probs,
+            self.targets.value(),
             B,
             T,
-            4 * C,
-            C,
+            V,
+            Vp,
         )
-        gelu_backward(dl_fch, l_fch, dl_fch_gelu, B * T * 4 * C)
         matmul_backward(
-            dl_ln2, dl_fcw, dl_fcb, dl_fch, l_ln2, l_fcw, B, T, C, 4 * C
-        )
-        layernorm_backward(
-            dl_residual2,
-            dl_ln2w,
-            dl_ln2b,
-            dl_ln2,
-            l_residual2,
-            l_ln2w,
-            l_ln2_mean,
-            l_ln2_rstd,
+            grads_acts.lnf,
+            grads.wte,
+            None,
+            grads_acts.logits,
+            acts.lnf,
+            self.params.wte,
             B,
             T,
             C,
+            Vp,
         )
-        residual_backward(dresidual, dl_attproj, dl_residual2, B * T * C)
-        matmul_backward(
-            dl_atty,
-            dl_attprojw,
-            dl_attprojb,
-            dl_attproj,
-            l_atty,
-            l_attprojw,
-            B,
-            T,
-            C,
-            C,
-        )
-        attention_backward(
-            dl_qkv, dl_preatt, dl_att, dl_atty, l_qkv, l_att, B, T, C, NH
-        )
-        matmul_backward(
-            dl_ln1, dl_qkvw, dl_qkvb, dl_qkv, l_ln1, l_qkvw, B, T, C, 3 * C
-        )
+        var residual: FloatPtr = (
+            acts.residual3 + (L - 1) * B * T * C
+        )  # last layer's residual
+        var dresidual: FloatPtr = (
+            grads_acts.residual3 + (L - 1) * B * T * C
+        )  # write to last layer's residual
         layernorm_backward(
             dresidual,
-            dl_ln1w,
-            dl_ln1b,
-            dl_ln1,
+            grads.lnfw,
+            grads.lnfb,
+            grads_acts.lnf,
             residual,
-            l_ln1w,
-            l_ln1_mean,
-            l_ln1_rstd,
+            self.params.lnfw,
+            acts.lnf_mean,
+            acts.lnf_rstd,
             B,
             T,
             C,
         )
 
-    encoder_backward(
-        model.grads.wte,
-        model.grads.wpe,
-        model.grads_acts.encoded,
-        model.inputs,
-        B,
-        T,
-        C,
-    )
+        for l in range(L - 1, -1, -1):
+            var residual = acts.encoded
+            var dresidual = grads_acts.encoded
+            if l != 0:
+                residual = acts.residual3 + (l - 1) * B * T * C
+                dresidual = grads_acts.residual3 + (l - 1) * B * T * C
 
+            # get the pointers of the weights for this layer
+            var l_ln1w: FloatPtr = self.params.ln1w + l * C
+            var l_qkvw: FloatPtr = (
+                self.params.qkvw + l * 3 * C * C
+            )
+            var l_attprojw: FloatPtr = (
+                self.params.attprojw + l * C * C
+            )
+            var l_ln2w: FloatPtr = self.params.ln2w + l * C
+            var l_fcw: FloatPtr = (
+                self.params.fcw + l * 4 * C * C
+            )
+            var l_fcprojw: FloatPtr = (
+                self.params.fcprojw + l * C * 4 * C
+            )
+            # get the pointers of the gradients of the weights for this layer
+            var dl_ln1w: FloatPtr = grads.ln1w + l * C
+            var dl_ln1b: FloatPtr = grads.ln1b + l * C
+            var dl_qkvw: FloatPtr = (
+                grads.qkvw + l * 3 * C * C
+            )
+            var dl_qkvb: FloatPtr = grads.qkvb + l * 3 * C
+            var dl_attprojw: FloatPtr = (
+                grads.attprojw + l * C * C
+            )
+            var dl_attprojb: FloatPtr = (
+                grads.attprojb + l * C
+            )
+            var dl_ln2w: FloatPtr = grads.ln2w + l * C
+            var dl_ln2b: FloatPtr = grads.ln2b + l * C
+            var dl_fcw: FloatPtr = (
+                grads.fcw + l * 4 * C * C
+            )
+            var dl_fcb: FloatPtr = grads.fcb + l * 4 * C
+            var dl_fcprojw: FloatPtr = (
+                grads.fcprojw + l * C * 4 * C
+            )
+            var dl_fcprojb: FloatPtr = (
+                grads.fcprojb + l * C
+            )
+            # get the pointers of the activations for this layer
+            var l_ln1: FloatPtr = acts.ln1 + l * B * T * C
+            var l_ln1_mean: FloatPtr = (
+                acts.ln1_mean + l * B * T
+            )
+            var l_ln1_rstd: FloatPtr = (
+                acts.ln1_rstd + l * B * T
+            )
+            var l_qkv: FloatPtr = (
+                acts.qkv + l * B * T * 3 * C
+            )
+            var l_atty: FloatPtr = (
+                acts.atty + l * B * T * C
+            )
+            var l_att: FloatPtr = (
+                acts.att + l * B * NH * T * T
+            )
+            var l_residual2: FloatPtr = (
+                acts.residual2 + l * B * T * C
+            )
+            var l_ln2: FloatPtr = acts.ln2 + l * B * T * C
+            var l_ln2_mean: FloatPtr = (
+                acts.ln2_mean + l * B * T
+            )
+            var l_ln2_rstd: FloatPtr = (
+                acts.ln2_rstd + l * B * T
+            )
+            var l_fch: FloatPtr = (
+                acts.fch + l * B * T * 4 * C
+            )
+            var l_fch_gelu: FloatPtr = (
+                acts.fch_gelu + l * B * T * 4 * C
+            )
+            # get the pointers of the gradients of the activations for this layer
+            var dl_ln1: FloatPtr = (
+                grads_acts.ln1 + l * B * T * C
+            )
+            var dl_qkv: FloatPtr = (
+                grads_acts.qkv + l * B * T * 3 * C
+            )
+            var dl_atty: FloatPtr = (
+                grads_acts.atty + l * B * T * C
+            )
+            var dl_preatt: FloatPtr = (
+                grads_acts.preatt + l * B * NH * T * T
+            )
+            var dl_att: FloatPtr = (
+                grads_acts.att + l * B * NH * T * T
+            )
+            var dl_attproj: FloatPtr = (
+                grads_acts.attproj + l * B * T * C
+            )
+            var dl_residual2: FloatPtr = (
+                grads_acts.residual2 + l * B * T * C
+            )
+            var dl_ln2: FloatPtr = (
+                grads_acts.ln2 + l * B * T * C
+            )
+            var dl_fch: FloatPtr = (
+                grads_acts.fch + l * B * T * 4 * C
+            )
+            var dl_fch_gelu: FloatPtr = (
+                grads_acts.fch_gelu + l * B * T * 4 * C
+            )
+            var dl_fcproj: FloatPtr = (
+                grads_acts.fcproj + l * B * T * C
+            )
+            var dl_residual3: FloatPtr = (
+                grads_acts.residual3 + l * B * T * C
+            )
 
-fn gpt2_update(
-    mut model: GPT2,
-    learning_rate: FLOAT,
-    beta1: FLOAT,
-    beta2: FLOAT,
-    eps: FLOAT,
-    weight_decay: FLOAT,
-    t: Int,
-):
-    # reference: https:#pytorch.org/docs/stable/generated/torch.optim.AdamW.html
+            # backprop this layer
+            residual_backward(dl_residual2, dl_fcproj, dl_residual3, B * T * C)
+            matmul_backward(
+                dl_fch_gelu,
+                dl_fcprojw,
+                dl_fcprojb,
+                dl_fcproj,
+                l_fch_gelu,
+                l_fcprojw,
+                B,
+                T,
+                4 * C,
+                C,
+            )
+            gelu_backward(dl_fch, l_fch, dl_fch_gelu, B * T * 4 * C)
+            matmul_backward(
+                dl_ln2, dl_fcw, dl_fcb, dl_fch, l_ln2, l_fcw, B, T, C, 4 * C
+            )
+            layernorm_backward(
+                dl_residual2,
+                dl_ln2w,
+                dl_ln2b,
+                dl_ln2,
+                l_residual2,
+                l_ln2w,
+                l_ln2_mean,
+                l_ln2_rstd,
+                B,
+                T,
+                C,
+            )
+            residual_backward(dresidual, dl_attproj, dl_residual2, B * T * C)
+            matmul_backward(
+                dl_atty,
+                dl_attprojw,
+                dl_attprojb,
+                dl_attproj,
+                l_atty,
+                l_attprojw,
+                B,
+                T,
+                C,
+                C,
+            )
+            attention_backward(
+                dl_qkv, dl_preatt, dl_att, dl_atty, l_qkv, l_att, B, T, C, NH
+            )
+            matmul_backward(
+                dl_ln1, dl_qkvw, dl_qkvb, dl_qkv, l_ln1, l_qkvw, B, T, C, 3 * C
+            )
+            layernorm_backward(
+                dresidual,
+                dl_ln1w,
+                dl_ln1b,
+                dl_ln1,
+                residual,
+                l_ln1w,
+                l_ln1_mean,
+                l_ln1_rstd,
+                B,
+                T,
+                C,
+            )
 
-    # lazily allocate the memory for m_memory and v_memory
-    if model.m_memory == NULL:
-        model.m_memory = UnsafePointer[Scalar[dtype]]().alloc(
-            model.num_parameters
+        encoder_backward(
+            grads.wte,
+            grads.wpe,
+            grads_acts.encoded,
+            self.inputs.value(),
+            B,
+            T,
+            C,
         )
-        model.v_memory = UnsafePointer[Scalar[dtype]]().alloc(
-            model.num_parameters
-        )
 
-        memset_zero(model.m_memory, model.num_parameters)
-        memset_zero(model.v_memory, model.num_parameters)
 
-    var num_vectorize = model.num_parameters // NUM_PARALLELIZE
+    def update(
+        mut self,
+        learning_rate: FLOAT,
+        beta1: FLOAT,
+        beta2: FLOAT,
+        eps: FLOAT,
+        weight_decay: FLOAT,
+        t: Int,
+    ):
+        # reference: https:#pytorch.org/docs/stable/generated/torch.optim.AdamW.html
 
-    @parameter
-    fn _calc(ip: Int):
+        # lazily allocate the memory for m_memory and v_memory
+        if not self.m_memory:
+            self.m_memory = alloc[Scalar[dtype]](self.num_parameters)
+            self.v_memory = alloc[Scalar[dtype]](self.num_parameters)
+
+            memset_zero(self.m_memory.value(), self.num_parameters)
+            memset_zero(self.v_memory.value(), self.num_parameters)
+
+        # local copies of the pointers for the update loop
+        var params_memory = self.params_memory
+        var grads_memory = self.grads.value().params_memory
+        var m_memory = self.m_memory.value()
+        var v_memory = self.v_memory.value()
+
+        var num_vectorize = self.num_parameters // NUM_PARALLELIZE
+
         @parameter
-        fn _op[width: Int](_iv: Int):
-            var iv = ip * num_vectorize + _iv
-            var param = model.params_memory.load[width=width](iv)
-            var grad = model.grads_memory.load[width=width](iv)
+        def _calc(ip: Int):
+            def _op[width: Int](_iv: Int) {ip, num_vectorize, params_memory, grads_memory, m_memory, v_memory, learning_rate, beta1, beta2, eps, weight_decay, t}:
+                var iv = ip * num_vectorize + _iv
+                var param = params_memory.load[width=width](iv)
+                var grad = grads_memory.load[width=width](iv)
 
-            # update the first moment (momentum)
-            var m = (
-                beta1 * model.m_memory.load[width=width](iv)
-                + (1.0 - beta1) * grad
-            )
-            # update the second moment (RMSprop)
-            var v = (
-                beta2 * model.v_memory.load[width=width](iv)
-                + (1.0 - beta2) * grad * grad
-            )
-            # bias-correct both moments
-            var m_hat = m / (1.0 - pow(beta1, t))
-            var v_hat = v / (1.0 - pow(beta2, t))
+                # update the first moment (momentum)
+                var m = (
+                    beta1 * m_memory.load[width=width](iv)
+                    + (1.0 - beta1) * grad
+                )
+                # update the second moment (RMSprop)
+                var v = (
+                    beta2 * v_memory.load[width=width](iv)
+                    + (1.0 - beta2) * grad * grad
+                )
+                # bias-correct both moments
+                var m_hat = m / (1.0 - pow(beta1, t))
+                var v_hat = v / (1.0 - pow(beta2, t))
 
-            # update
-            model.m_memory.store(iv, m)
-            model.v_memory.store(iv, v)
-            model.params_memory.store(
-                iv,
-                model.params_memory.load[width=width](iv)
-                - learning_rate
-                * (m_hat / (sqrt(v_hat) + eps) + weight_decay * param),
-            )
+                # update
+                m_memory.store(iv, m)
+                v_memory.store(iv, v)
+                params_memory.store(
+                    iv,
+                    params_memory.load[width=width](iv)
+                    - learning_rate
+                    * (m_hat / (sqrt(v_hat) + eps) + weight_decay * param),
+                )
 
-        vectorize[_op, SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](num_vectorize)
+            vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](num_vectorize, _op)
 
-    parallelize[_calc](NUM_PARALLELIZE)
+        parallelize[_calc](NUM_PARALLELIZE)
 
 
-fn gpt2_free(mut model: GPT2):
-    model.params_memory.free()
-    model.grads_memory.free()
-    model.m_memory.free()
-    model.v_memory.free()
-    model.acts_memory.free()
-    model.grads_acts_memory.free()
-    model.inputs.free()
-    model.targets.free()
+    def __del__(deinit self):
+        self.params_memory.free()
+        if self.grads:
+            self.grads.value().params_memory.free()
+        if self.m_memory:
+            self.m_memory.value().free()
+        if self.v_memory:
+            self.v_memory.value().free()
+        if self.acts:
+            self.acts.value().acts_memory.free()
+        if self.grads_acts:
+            self.grads_acts.value().acts_memory.free()
+        if self.inputs:
+            self.inputs.value().free()
+        if self.targets:
+            self.targets.value().free()
 
 
 # ifndef TESTING
@@ -1769,94 +1690,77 @@ struct DataLoader[B: Int, T: Int]:
     var file_size: Int
     var current_position: Int
     # output memory
-    var batch: InlineArray[Scalar[dtype_int], B * T + 1]
-    var inputs: UnsafePointer[Scalar[dtype_int]]
-    var targets: UnsafePointer[Scalar[dtype_int]]
+    var batch: InlineArray[Scalar[dtype_int], Self.B * Self.T + 1]
+    var inputs: IntPtr
+    var targets: IntPtr
     # convenience variables
     var num_batches: Int
 
-    fn __init__(out self):
-        self.filename = ""
-        self.tokens_file = FileHandle()
-        self.file_size = 0
+    def __init__(out self, filename: String) raises:
+        self.filename = filename
+        self.tokens_file = open(filename, "r")
+
+        # determine the file size
+        self.file_size = getsize(filename)
+
+        if self.file_size < (Self.B * Self.T + 1) * SIZEOF_INT:
+            raise Error(
+                "Error: file size is too small for the batch size and"
+                " sequence length"
+            )
+
+        self.current_position = 0  # start at the beginning
+
+        # allocate space for B*T + 1 integers to store the inputs and targets
+        self.batch = InlineArray[Scalar[dtype_int], Self.B * Self.T + 1](fill=0)
+        self.inputs = self.batch.unsafe_ptr().unsafe_origin_cast[
+            MutUntrackedOrigin
+        ]()
+        self.targets = (
+            self.inputs + 1
+        )  # targets are shifted by one
+        self.num_batches = self.file_size // (Self.B * Self.T * SIZEOF_INT)
+
+    def reset(mut self):
         self.current_position = 0
-        self.batch = InlineArray[Scalar[dtype_int], B * T + 1](fill=0)
-        self.inputs = self.batch.unsafe_ptr()
-        self.targets = self.batch.unsafe_ptr() + 1  # targets are shifted by one
-        self.num_batches = 0
 
+    def next_batch(mut self) raises:
+        # if we are at the end of the file, loop back to the beginning
+        if (
+            self.current_position + ((Self.B * Self.T + 1) * SIZEOF_INT)
+            > self.file_size
+        ):
+            self.current_position = 0
 
-fn dataloader_init(
-    mut loader: DataLoader, filename: String, B: Int, T: Int
-) raises:
-    try:
-        loader.tokens_file = open(filename, "r")
-    except e:
-        print("Error opening file", filename, e)
-        exit(1)
+        # read the B*T+1 integers from the file into batch
+        _ = self.tokens_file.seek(UInt64(self.current_position))
 
-    # determine the file size
-    _os = Python.import_module("os")
-    loader.file_size = Int(_os.path.getsize(filename))
+        read_to_buf(self.batch, self.tokens_file)
 
-    if loader.file_size < (B * T + 1) * 4:
-        print(
-            "Error: file size is too small for the batch size and sequence"
-            " length\n"
-        )
+        # advance the current position by B*T integers
+        self.current_position += Self.B * Self.T * SIZEOF_INT
 
-    loader.current_position = 0  # start at the beginning
-
-    # allocate space for B*T + 1 integers to store the inputs and targets
-    # Note: batch is already allocated in __init__, just set up the pointers
-    loader.inputs = loader.batch.unsafe_ptr()
-    loader.targets = loader.batch.unsafe_ptr() + 1  # targets are shifted by one
-    loader.num_batches = loader.file_size // (B * T * SIZEOF_INT)
-
-
-fn dataloader_reset(mut loader: DataLoader):
-    loader.current_position = 0
-
-
-fn dataloader_next_batch(mut loader: DataLoader) raises:
-    var B: Int = loader.B
-    var T: Int = loader.T
-
-    # if we are at the end of the file, loop back to the beginning
-    if loader.current_position + ((B * T + 1) * SIZEOF_INT) > loader.file_size:
-        loader.current_position = 0
-
-    # read the B*T+1 integers from the file into batch
-    _ = loader.tokens_file.seek(loader.current_position)
-
-    read_to_buf(loader.batch, loader.tokens_file)
-
-    # advance the current position by B*T integers
-    loader.current_position += B * T * SIZEOF_INT
-
-
-fn dataloader_free(mut loader: DataLoader) raises:
-    loader.tokens_file.close()
-    # Note: InlineArray doesn't need explicit free, it's stack allocated
+    # no explicit free needed: the FileHandle closes itself on destruction
+    # and the batch InlineArray lives inline in the struct
 
 
 # ----------------------------------------------------------------------------
 # sampler
 
 
-fn random_u32(mut state: UInt64) -> UInt32:
+def random_u32(mut state: UInt64) -> UInt32:
     state ^= state >> 12
     state ^= state << 25
     state ^= state >> 27
     return ((state * RU32_HEX) >> 32).cast[DType.uint32]()
 
 
-fn random_f32(mut state: UInt64) -> Float32:
+def random_f32(mut state: UInt64) -> Float32:
     return (random_u32(state) >> 8).cast[DType.float32]() / RF32_DIV
 
 
-fn sample_mult(
-    probabilities: UnsafePointer[Scalar[dtype]], n: Int, coin: FLOAT
+def sample_mult(
+    probabilities: FloatPtr, n: Int, coin: FLOAT
 ) -> Int:
     # sample index from probabilities (they must sum to 1!)
     # coin is a random number in [0, 1), usually from random_f32()
@@ -1878,7 +1782,7 @@ struct Tokenizer:
     var token_table: List[String]
     var init_ok: Int
 
-    fn __init__(out self, filename: String) raises:
+    def __init__(out self, filename: String) raises:
         self.vocab_size = 0
         self.token_table = List[String]()
         self.init_ok = 0
@@ -1901,18 +1805,16 @@ struct Tokenizer:
         _ = file.read(header)
 
         if header[0] != 20240328:
-            print("Bad magic model file", header[0])
-            exit(1)
+            raise Error(t"Bad magic tokenizer file {header[0]}")
         if header[1] != 2:
-            print("Bad version in model file", header[1])
-            exit(1)
+            raise Error(t"Bad version in tokenizer file {header[1]}")
 
         self.vocab_size = Int(header[2])
 
         for _ in range(self.vocab_size):
             var length = Int(file.read_bytes(1)[0])
-            var str: String = file.read(length)
-            if length > 0 and len(str) > 0:
+            var str = String(from_utf8_lossy=file.read_bytes(length))
+            if length > 0 and str.byte_length() > 0:
                 self.token_table.append(str)
             else:
                 self.token_table.append("")
@@ -1920,7 +1822,7 @@ struct Tokenizer:
         file.close()
         self.init_ok = 1
 
-    fn decode(self, token_id: Int) -> String:
+    def decode(self, token_id: Int) -> String:
         if self.init_ok == 0:
             return ""
 
@@ -1929,12 +1831,12 @@ struct Tokenizer:
         else:
             return ""
 
-    fn safe_printf(self, s: String):
+    def safe_printf(self, s: String):
         # the tokens are raw bytes, and we we only want to print the printable ones
         # many bytes can be various control codes, backspace, etc.
-        if s == String(NULL):
+        if s.byte_length() == 0:
             return
-        if s[0] == "\0":
+        if s.as_bytes()[0] == 0:
             return
         # handle individual byte tokens
         # every token is asserted to be at least one byte so doing piece[1] is ok
@@ -1950,28 +1852,32 @@ struct Tokenizer:
         print(s, end="")
 
 
-fn read_to_buf[
-    T: DType
-](mut buf: InlineArray[Scalar[T]], file_handle: FileHandle) raises -> None:
+def read_to_buf[
+    T: DType, n: Int
+](mut buf: InlineArray[Scalar[T], n], file_handle: FileHandle) raises -> None:
     _ = file_handle.read(buf)
 
 
-fn read_to_dtype_pointer[
+def read_to_dtype_pointer[
     T: DType
 ](
-    ptr: UnsafePointer[Scalar[T]], file_handle: FileHandle, size: Int
+    ptr: UnsafePointer[Scalar[T], MutUntrackedOrigin], file_handle: FileHandle, size: Int
 ) raises -> None:
     # Read directly into the pointer using read_bytes
-    var bytes_to_read = size * sizeof[Scalar[T]]()
+    var bytes_to_read = size * size_of[Scalar[T]]()
     var bytes_data = file_handle.read_bytes(bytes_to_read)
-    memcpy(ptr.bitcast[UInt8](), bytes_data.unsafe_ptr(), bytes_to_read)
+    memcpy(
+        dest=ptr.bitcast[UInt8](),
+        src=bytes_data.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin](),
+        count=bytes_to_read,
+    )
 
 
 # ----------------------------------------------------------------------------
 # main training loop
 
 
-fn main() raises:
+def main() raises:
     # build the GPT-2 model from a checkpoint
     var model = GPT2("gpt2_124M.bin")
 
@@ -1992,13 +1898,11 @@ fn main() raises:
         train_tokens = tiny_stories_train
         val_tokens = tiny_stories_val
 
-    alias B: Int = 4
-    alias T: Int = 64
-    var train_loader = DataLoader[B, T]()
-    dataloader_init(train_loader, train_tokens, B, T)
+    comptime B: Int = 4
+    comptime T: Int = 64
+    var train_loader = DataLoader[B, T](train_tokens)
     print("train dataset num_batches:", train_loader.num_batches)
-    var val_loader = DataLoader[B, T]()
-    dataloader_init(val_loader, val_tokens, B, T)
+    var val_loader = DataLoader[B, T](val_tokens)
     print("val dataset num_batches:", val_loader.num_batches)
     var val_num_batches: Int = 10
 
@@ -2008,7 +1912,7 @@ fn main() raises:
     # some memory for generating samples from the model
     var rng_state: UInt64 = 1337
     var gen_max_length: Int = 64
-    var gen_tokens = UnsafePointer[Scalar[dtype_int]]().alloc(gen_max_length)
+    var gen_tokens = alloc[Scalar[dtype_int]](gen_max_length)
 
     # train
 
@@ -2018,13 +1922,13 @@ fn main() raises:
         # once in a while estimate the validation loss
         if step % 10 == 0:
             var val_loss: FLOAT = 0.0
-            dataloader_reset(val_loader)
-            for i in range(val_num_batches):
-                dataloader_next_batch(val_loader)
-                gpt2_forward(model, val_loader.inputs, val_loader.targets, B, T)
+            val_loader.reset()
+            for _ in range(val_num_batches):
+                val_loader.next_batch()
+                model.forward(val_loader.inputs, val_loader.targets, B, T)
                 val_loss += model.mean_loss
 
-            val_loss /= val_num_batches
+            val_loss /= FLOAT(val_num_batches)
             print("val loss", val_loss)
 
         # once in a while do model inference to prgenerated INT32 text
@@ -2039,15 +1943,16 @@ fn main() raises:
                 # for each t, we re-compute all activations between 0 and t
                 # leaving this alone because you want separate code for inference anyway
                 # the inference here is just for sanity checking purposes
-                gpt2_forward(model, gen_tokens, NULL_INT, 1, t)
+                model.forward(gen_tokens, None, 1, t)
                 var probs = (
-                    model.acts.probs + (t - 1) * model.config.padded_vocab_size
+                    model.acts.value().probs
+                    + (t - 1) * model.config.padded_vocab_size
                 )
                 var coin: FLOAT = random_f32(rng_state).cast[dtype]()
                 var next_token: Int = sample_mult(
                     probs, model.config.vocab_size, coin
                 )
-                gen_tokens[t] = next_token
+                gen_tokens[t] = INT(next_token)
                 # print the generated token, either using the Tokenizer or a fallback
                 if tokenizer.init_ok:
                     var token_str: String = tokenizer.decode(next_token)
@@ -2063,29 +1968,18 @@ fn main() raises:
 
         var start_time = perf_counter_ns()
 
-        dataloader_next_batch(train_loader)
-        gpt2_forward(model, train_loader.inputs, train_loader.targets, B, T)
-        gpt2_zero_grad(model)
-        gpt2_backward(model)
-        gpt2_update(model, 1e-4, 0.9, 0.999, 1e-8, 0.0, step + 1)
+        train_loader.next_batch()
+        model.forward(train_loader.inputs, train_loader.targets, B, T)
+        model.zero_grad()
+        model.backward()
+        model.update(1e-4, 0.9, 0.999, 1e-8, 0.0, step + 1)
 
-        var elapsed_time_ms = (perf_counter_ns() - start_time) / 1_000_000.0
+        var elapsed_time_ms = Float64(perf_counter_ns() - start_time) / 1_000_000.0
 
         elapsed_time_ms_total += elapsed_time_ms
 
-        print(
-            "step "
-            + String(step)
-            + ": train loss "
-            + String(model.mean_loss)
-            + " (took "
-            + String(Int(elapsed_time_ms))
-            + " ms, average: "
-            + String(Int(elapsed_time_ms_total / (step + 1)))
-            + " ms)"
-        )
+        var tokens_per_second = Float64(B * T) * 1000.0 / elapsed_time_ms
 
-    # free
-    dataloader_free(train_loader)
-    dataloader_free(val_loader)
-    gpt2_free(model)
+        print(
+            t"step {step}: train loss {model.mean_loss} (took {Int(elapsed_time_ms)} ms, average: {Int(elapsed_time_ms_total / Float64(step + 1))} ms, {Int(tokens_per_second)} tok/s)"
+        )

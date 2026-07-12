@@ -6,3 +6,9 @@ data/
 # magic environments
 .magic
 graph2.py
+lab/
+# build binaries
+/train_gpt2
+/test_gpt2
+# tooling artifacts
+skills-lock.json

@@ -2,9 +2,11 @@
 
 ### Step 1: Install python requirements
 
-Before running the following Python scripts, run this command to install the necessary Python packages:
+Before running the following Python scripts, create and activate a virtual environment, then install the necessary Python packages:
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
@@ -48,5 +50,3 @@ mojo train_gpt2.mojo
 ```
 
 This command initiates the training process using the prepared data. When you execute the `pixi shell` command for the first time, it will automatically install all necessary dependencies defined in `pixi.toml`.
-
-This command initiates the training process using the prepared data. When you execute the magic command for the first time, it will automatically install all necessary dependencies.
