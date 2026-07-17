@@ -66,7 +66,9 @@ llm.🔥 began in 2024 as a response to Karpathy's then newly released [llm.c](h
 
 Sustained interest in the repo has kept us updating it to track new Mojo releases, without expanding its scope. In that same spirit, our next planned milestone is a port to **Mojo 1.0**. Beyond 1.0 we have no concrete plans to develop the project further.
 
-We occasionally weighed adding GPU support. That ground is now well covered by [ulmentflam/llm.mojo](https://github.com/ulmentflam/llm.mojo), a GPU-accelerated port built on hand-written CUDA and Metal kernels via MAX. It also shows how far *pure-CPU* throughput can be pushed by leaning on MAX's `linalg` GEMM kernel (`linalg.matmul` — cache/register-tiled, SIMD-vectorized, multi-threaded) instead of hand-written loops: in a matched side-by-side benchmark it runs roughly **6× faster than this project on CPU** (fp32, same machine, same workload).
+We occasionally weighed adding GPU support. That ground is now well covered by [ulmentflam/llm.mojo](https://github.com/ulmentflam/llm.mojo), a GPU-accelerated port built on hand-written CUDA and Metal kernels via MAX.
+
+Inspired by ulmentflam/llm.mojo, we are looking into speeding up CPU throughput by utilizing MAX's `linalg` GEMM kernel (`linalg.matmul`) in place of our hand-written matmul loops. See [variants.md](variants.md) for the variants we have built and their speed comparison.
 
 ## Changelog
 
