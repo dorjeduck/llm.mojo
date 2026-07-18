@@ -1,12 +1,15 @@
-# llm.🔥
+# llm.mojo
 
-This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/llm.c) to [Mojo](https://mojolang.org), currently in beta. Visit [llm.c](https://github.com/karpathy/llm.c) for a detailed explanation of the original project.
+This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/llm.c) to [Mojo](https://mojolang.org). Visit [llm.c](https://github.com/karpathy/llm.c) for a detailed explanation of the original project.
 
-> **Note**: We are preparing this repo for the upcoming Mojo 1.0 release — this is work in progress. It currently builds against the Mojo 1.0.0b2 beta.
+**Notes:**
+
+- llm.mojo is a port of an earlier (2024) version of llm.c ([train_gpt2.c @ 2d43e5b](https://github.com/karpathy/llm.c/blob/2d43e5b/train_gpt2.c)), not the current upstream. llm.c has since optimized its CPU matmul (register tiling in `matmul_forward`).
+- We are preparing this repo for the upcoming Mojo 1.0 release — work in progress; it currently builds against the Mojo 1.0.0b2 beta.
 
 ## Prerequisite
 
-Before using llm.🔥 for the first time, please run the following preparatory commands in a virtual environment:
+Before using llm.mojo for the first time, please run the following preparatory commands in a virtual environment:
   
 ```bash
 python3 -m venv .venv
@@ -62,7 +65,7 @@ We ported `test_gpt2.c` from the original repository to Mojo to validate our por
 
 ## Project Outlook
 
-llm.🔥 began in 2024 as a response to Karpathy's then newly released [llm.c](https://github.com/karpathy/llm.c). Its purpose was to show that Mojo could implement the same low-level, C-style program — raw pointers, manual memory management — while matching its performance.
+llm.mojo began in 2024 as a response to Karpathy's then newly released [llm.c](https://github.com/karpathy/llm.c). Its purpose was to show that Mojo could implement the same low-level, C-style program — raw pointers, manual memory management — while matching its performance.
 
 Sustained interest in the repo has kept us updating it to track new Mojo releases, without expanding its scope. In that same spirit, our next planned milestone is a port to **Mojo 1.0**. Beyond 1.0 we have no concrete plans to develop the project further.
 

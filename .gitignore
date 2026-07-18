@@ -3,6 +3,7 @@ data/
 # pixi environments
 .pixi
 *.egg-info
+__pycache__/
 # magic environments
 .magic
 graph2.py
