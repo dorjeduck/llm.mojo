@@ -6,6 +6,7 @@ data/
 # magic environments
 .magic
 graph2.py
+train_gpt2_tiled.mojo
 lab/
 # build binaries
 /train_gpt2

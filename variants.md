@@ -24,10 +24,10 @@ gradient stays hand-written.
 Same workload for every arm (B=4, T=64, 41 steps, fp32, CPU, `gpt2_124M.bin`
 init), averaged over the steady-state steps.
 
-| Variant                    | Average Training Loop Time | Throughput      |
-|----------------------------|----------------------------|-----------------|
-| train_gpt2.mojo (baseline) | 1716 ms                    | 149 tok/s       |
-| V1 — forward only          | 1223 ms                    | 210 tok/s       |
-| V2 — forward + backward    | 232 ms                     | 1109 tok/s      |
+| Variant                    | Average Training Loop Time | Throughput      | Speedup |
+|----------------------------|----------------------------|-----------------|---------|
+| train_gpt2.mojo (baseline) | 1716 ms                    | 149 tok/s       | 1.00x   |
+| V1 — forward only          | 1223 ms                    | 210 tok/s       | 1.41x   |
+| V2 — forward + backward    | 232 ms                     | 1109 tok/s      | 7.44x   |
 
 !['Average Throughput'](imgs/variants_chart.png)

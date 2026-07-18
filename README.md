@@ -45,16 +45,16 @@ Basic benchmark results: (M2 MacBook Pro)
 
 - Below are average training loop times, observed across the various implementations. Please note that these results are intended to provide a general comparison rather than precise, repeatable metrics.
 
-- We are running the OpenMP-enabled train_gpt2.c with 64 threads.
-  (`OMP_NUM_THREADS=64 ./train_gpt2`)
+- We are running the OpenMP-enabled train_gpt2.c with 10 threads.
+  (`OMP_NUM_THREADS=10 ./train_gpt2`)
 
-| Implementation             | Average Training Loop Time |
-|----------------------------|----------------------------|
-| train_gpt2.mojo            | 1721 ms                    |
-| train_gpt2.c (with OpenMP) | 1836 ms                    |
-| train_gpt2.c (no OpenMP)   | 7473 ms                    |
+| Implementation             | Average Training Loop Time | Throughput |
+|----------------------------|----------------------------|------------|
+| train_gpt2.mojo            | 1704 ms                    | 150 tok/s  |
+| train_gpt2.c (with OpenMP) | 1987 ms                    | 128 tok/s  |
+| train_gpt2.c (no OpenMP)   | 7405 ms                    | 34 tok/s   |
 
-!['Training Loop Times'](imgs/training_loop_times_chart.png)
+!['Average Throughput'](imgs/karpathy_chart.png)
 
 ## Test
 
