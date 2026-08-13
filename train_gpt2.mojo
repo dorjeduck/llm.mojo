@@ -1,7 +1,14 @@
-from std.algorithm import vectorize, parallelize
+from std.algorithm import vectorize
+from max.algorithm import parallelize
 from std.collections import InlineArray
 from std.math import sqrt, exp, tanh, cosh, log
-from std.memory import UnsafePointer, alloc, memset, memset_zero, memcpy
+from std.memory import (
+    Pointer,
+    memset,
+    unsafe_memset_zero,
+    unsafe_memcpy,
+)
+from std.memory.alloc import unsafe_alloc
 from std.os.path import getsize
 from std.sys import CompilationTarget
 from std.sys.info import simd_width_of, size_of
@@ -30,8 +37,8 @@ comptime RF32_DIV = 16777216.0
 comptime FLOAT = SIMD[dtype, 1]
 comptime INT = SIMD[dtype_int, 1]
 
-comptime FloatPtr = UnsafePointer[Scalar[dtype], MutUntrackedOrigin]
-comptime IntPtr = UnsafePointer[Scalar[dtype_int], MutUntrackedOrigin]
+comptime FloatPtr = Pointer[Scalar[dtype], MutUntrackedOrigin]
+comptime IntPtr = Pointer[Scalar[dtype_int], MutUntrackedOrigin]
 
 comptime M_PI: FLOAT = 3.141592653589793115997963468544185161590576171875
 
@@ -58,19 +65,20 @@ def encoder_forward(
     def _calc(b: Int):
         for t in range(T):
             # seek to the output position in out[b,t,:]
-            var out_bt: FloatPtr = vout + b * T * C + t * C
+            var out_bt: FloatPtr = vout.unsafe_offset(b * T * C).unsafe_offset(t * C)
             # get the index of the token at inp[b, t]
-            var ix = inp[b * T + t]
+            var ix = inp[unsafe_offset=b * T + t]
             # seek to the position in wte corresponding to the token
-            var wte_ix: FloatPtr = wte + Int(ix) * C
+            var wte_ix: FloatPtr = wte.unsafe_offset(Int(ix) * C)
             # seek to the position in wpe corresponding to the position
-            var wpe_t: FloatPtr = wpe + t * C
+            var wpe_t: FloatPtr = wpe.unsafe_offset(t * C)
             # add the two vectors and store the result in out[b,t,:]
 
             def _op[width: Int](iv: Int) {out_bt, wte_ix, wpe_t}:
-                out_bt.store(
+                out_bt.unsafe_store(
                     iv,
-                    wte_ix.load[width=width](iv) + wpe_t.load[width=width](iv),
+                    wte_ix.unsafe_load[width=width](iv)
+                    + wpe_t.unsafe_load[width=width](iv),
                 )
 
             vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](C, _op)
@@ -90,15 +98,17 @@ def encoder_backward(
     @parameter
     def _calc(b: Int):
         for t in range(T):
-            var dout_bt: FloatPtr = dout + b * T * C + t * C
-            var ix = inp[b * T + t]
-            var dwte_ix: FloatPtr = dwte + Int(ix) * C
-            var dwpe_t: FloatPtr = dwpe + t * C
+            var dout_bt: FloatPtr = dout.unsafe_offset(b * T * C).unsafe_offset(t * C)
+            var ix = inp[unsafe_offset=b * T + t]
+            var dwte_ix: FloatPtr = dwte.unsafe_offset(Int(ix) * C)
+            var dwpe_t: FloatPtr = dwpe.unsafe_offset(t * C)
 
             def _op[width: Int](iv: Int) {dout_bt, dwte_ix, dwpe_t}:
-                var d = dout_bt.load[width=width](iv)
-                dwte_ix.store(iv, dwte_ix.load[width=width](iv) + d)
-                dwpe_t.store(iv, dwpe_t.load[width=width](iv) + d)
+                var d = dout_bt.unsafe_load[width=width](iv)
+                dwte_ix.unsafe_store(
+                    iv, dwte_ix.unsafe_load[width=width](iv) + d
+                )
+                dwpe_t.unsafe_store(iv, dwpe_t.unsafe_load[width=width](iv) + d)
 
             vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](C, _op)
 
@@ -122,12 +132,12 @@ def layernorm_forward(
     def _calc(b: Int):
         for t in range(T):
             # seek to the input position inp[b,t,:]
-            var x: FloatPtr = inp + b * T * C + t * C
+            var x: FloatPtr = inp.unsafe_offset(b * T * C).unsafe_offset(t * C)
             # calculate the mean
             var m: FLOAT = 0.0
 
             def _op[width: Int](iv: Int) {x, mut m}:
-                m += x.load[width=width](iv).reduce_add[1]()
+                m += x.unsafe_load[width=width](iv).reduce_add[1]()
 
             vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](C, _op)
 
@@ -137,7 +147,7 @@ def layernorm_forward(
             var v: FLOAT = 0.0
 
             def _op2[width: Int](iv: Int) {x, m, mut v}:
-                var xshift = x.load[width=width](iv) - m
+                var xshift = x.unsafe_load[width=width](iv) - m
                 v += pow(xshift, 2).reduce_add[1]()
 
             vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](C, _op2)
@@ -148,21 +158,23 @@ def layernorm_forward(
             var s: FLOAT = FLOAT(1.0) / sqrt(v + eps)
 
             # seek to the output position in out[b,t,:]
-            var out_bt: FloatPtr = vout + b * T * C + t * C
+            var out_bt: FloatPtr = vout.unsafe_offset(b * T * C).unsafe_offset(t * C)
 
             def _op3[width: Int](iv: Int) {s, x, m, weight, bias, out_bt}:
-                var n = s * (x.load[width=width](iv) - m)  # normalized output
-                out_bt.store(
+                var n = s * (
+                    x.unsafe_load[width=width](iv) - m
+                )  # normalized output
+                out_bt.unsafe_store(
                     iv,
-                    n * weight.load[width=width](iv)
-                    + bias.load[width=width](iv),
+                    n * weight.unsafe_load[width=width](iv)
+                    + bias.unsafe_load[width=width](iv),
                 )  # scale and shift it
 
             vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](C, _op3)
 
             # cache the mean and rstd for the backward pass later
-            mean[b * T + t] = m
-            rstd[b * T + t] = s
+            mean[unsafe_offset=b * T + t] = m
+            rstd[unsafe_offset=b * T + t] = s
 
     parallelize[_calc](B)
 
@@ -183,23 +195,33 @@ def layernorm_backward(
     @parameter
     def _calc(b: Int):
         for t in range(T):
-            var dout_bt: FloatPtr = dout + b * T * C + t * C
-            var inp_bt: FloatPtr = inp + b * T * C + t * C
-            var dinp_bt: FloatPtr = dinp + b * T * C + t * C
-            var mean_bt: FLOAT = mean[b * T + t]
-            var rstd_bt: FLOAT = rstd[b * T + t]
+            var dout_bt: FloatPtr = dout.unsafe_offset(b * T * C).unsafe_offset(t * C)
+            var inp_bt: FloatPtr = inp.unsafe_offset(b * T * C).unsafe_offset(t * C)
+            var dinp_bt: FloatPtr = dinp.unsafe_offset(b * T * C).unsafe_offset(t * C)
+            var mean_bt: FLOAT = mean[unsafe_offset=b * T + t]
+            var rstd_bt: FLOAT = rstd[unsafe_offset=b * T + t]
 
             # first: two reduce operations
             var dnorm_mean: FLOAT = 0.0
             var dnorm_norm_mean: FLOAT = 0.0
 
-            def _op[width: Int](iv: Int) {inp_bt, mean_bt, rstd_bt, weight, dout_bt, mut dnorm_mean, mut dnorm_norm_mean}:
+            def _op[
+                width: Int
+            ](iv: Int) {
+                inp_bt,
+                mean_bt,
+                rstd_bt,
+                weight,
+                dout_bt,
+                mut dnorm_mean,
+                mut dnorm_norm_mean,
+            }:
                 var norm_bti = (
-                    inp_bt.load[width=width](iv) - mean_bt
+                    inp_bt.unsafe_load[width=width](iv) - mean_bt
                 ) * rstd_bt
-                var dnorm_i = weight.load[width=width](iv) * dout_bt.load[
-                    width=width
-                ](iv)
+                var dnorm_i = weight.unsafe_load[width=width](
+                    iv
+                ) * dout_bt.unsafe_load[width=width](iv)
                 dnorm_mean += dnorm_i.reduce_add[1]()
                 dnorm_norm_mean += (dnorm_i * norm_bti).reduce_add[1]()
 
@@ -210,28 +232,42 @@ def layernorm_backward(
 
             # now iterate again and accumulate all the gradients
 
-            def _op2[width: Int](iv: Int) {inp_bt, mean_bt, rstd_bt, weight, dout_bt, dbias, dweight, dinp_bt, dnorm_mean, dnorm_norm_mean}:
+            def _op2[
+                width: Int
+            ](iv: Int) {
+                inp_bt,
+                mean_bt,
+                rstd_bt,
+                weight,
+                dout_bt,
+                dbias,
+                dweight,
+                dinp_bt,
+                dnorm_mean,
+                dnorm_norm_mean,
+            }:
                 var norm_bti = (
-                    inp_bt.load[width=width](iv) - mean_bt
+                    inp_bt.unsafe_load[width=width](iv) - mean_bt
                 ) * rstd_bt
-                var dnorm_i = weight.load[width=width](iv) * dout_bt.load[
-                    width=width
-                ](iv)
+                var dnorm_i = weight.unsafe_load[width=width](
+                    iv
+                ) * dout_bt.unsafe_load[width=width](iv)
                 # gradient contribution to bias
-                dbias.store(
+                dbias.unsafe_store(
                     iv,
-                    dbias.load[width=width](iv) + dout_bt.load[width=width](iv),
+                    dbias.unsafe_load[width=width](iv)
+                    + dout_bt.unsafe_load[width=width](iv),
                 )
                 # gradient contribution to weight
-                dweight.store(
+                dweight.unsafe_store(
                     iv,
-                    dweight.load[width=width](iv)
-                    + norm_bti * dout_bt.load[width=width](iv),
+                    dweight.unsafe_load[width=width](iv)
+                    + norm_bti * dout_bt.unsafe_load[width=width](iv),
                 )
                 # gradient contribution to input
-                dinp_bt.store(
+                dinp_bt.unsafe_store(
                     iv,
-                    dinp_bt.load[width=width](iv)
+                    dinp_bt.unsafe_load[width=width](iv)
                     + (dnorm_i - dnorm_mean - (norm_bti * dnorm_norm_mean))
                     * rstd_bt,
                 )
@@ -260,26 +296,24 @@ def matmul_forward(
     @parameter
     def _calc(b: Int):
         for t in range(T):
-            var out_bt: FloatPtr = (
-                vout + b * T * OC + t * OC
-            )
-            var inp_bt: FloatPtr = inp + b * T * C + t * C
+            var out_bt: FloatPtr = vout.unsafe_offset(b * T * OC).unsafe_offset(t * OC)
+            var inp_bt: FloatPtr = inp.unsafe_offset(b * T * C).unsafe_offset(t * C)
 
             for o in range(OC):
                 var val: FLOAT = 0.0
                 if bias:
-                    val = bias.value()[o]
-                var wrow: FloatPtr = weight + o * C
+                    val = bias.value()[unsafe_offset=o]
+                var wrow: FloatPtr = weight.unsafe_offset(o * C)
 
                 def _op[width: Int](iv: Int) {inp_bt, wrow, mut val}:
-                    var t = inp_bt.load[width=width](iv) * wrow.load[
-                        width=width
-                    ](iv)
+                    var t = inp_bt.unsafe_load[width=width](
+                        iv
+                    ) * wrow.unsafe_load[width=width](iv)
                     val += t.reduce_add[1]()
 
                 vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](C, _op)
 
-                out_bt[o] = val
+                out_bt[unsafe_offset=o] = val
 
     parallelize[_calc](B)
 
@@ -306,19 +340,17 @@ def matmul_backward(
     @parameter
     def _calc(b: Int):
         for t in range(T):
-            var dout_bt: FloatPtr = (
-                dout + b * T * OC + t * OC
-            )
-            var dinp_bt: FloatPtr = dinp + b * T * C + t * C
+            var dout_bt: FloatPtr = dout.unsafe_offset(b * T * OC).unsafe_offset(t * OC)
+            var dinp_bt: FloatPtr = dinp.unsafe_offset(b * T * C).unsafe_offset(t * C)
             for o in range(OC):
-                var wrow: FloatPtr = weight + o * C
-                var d: FLOAT = dout_bt[o]
+                var wrow: FloatPtr = weight.unsafe_offset(o * C)
+                var d: FLOAT = dout_bt[unsafe_offset=o]
 
                 def _op[width: Int](iv: Int) {dinp_bt, wrow, d}:
-                    dinp_bt.store(
+                    dinp_bt.unsafe_store(
                         iv,
-                        dinp_bt.load[width=width](iv)
-                        + wrow.load[width=width](iv) * d,
+                        dinp_bt.unsafe_load[width=width](iv)
+                        + wrow.unsafe_load[width=width](iv) * d,
                     )  # scale and shift it
 
                 vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](C, _op)
@@ -331,22 +363,18 @@ def matmul_backward(
     def _calc2(o: Int):
         for b in range(B):
             for t in range(T):
-                var dout_bt: FloatPtr = (
-                    dout + b * T * OC + t * OC
-                )
-                var inp_bt: FloatPtr = (
-                    inp + b * T * C + t * C
-                )
-                var dwrow: FloatPtr = dweight + o * C
-                var d: FLOAT = dout_bt[o]
+                var dout_bt: FloatPtr = dout.unsafe_offset(b * T * OC).unsafe_offset(t * OC)
+                var inp_bt: FloatPtr = inp.unsafe_offset(b * T * C).unsafe_offset(t * C)
+                var dwrow: FloatPtr = dweight.unsafe_offset(o * C)
+                var d: FLOAT = dout_bt[unsafe_offset=o]
                 if dbias:
-                    dbias.value()[o] += d
+                    dbias.value()[unsafe_offset=o] += d
 
                 def _op[width: Int](iv: Int) {dwrow, inp_bt, d}:
-                    dwrow.store(
+                    dwrow.unsafe_store(
                         iv,
-                        dwrow.load[width=width](iv)
-                        + inp_bt.load[width=width](iv) * d,
+                        dwrow.unsafe_load[width=width](iv)
+                        + inp_bt.unsafe_load[width=width](iv) * d,
                     )  # scale and shift it
 
                 vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](C, _op)
@@ -377,31 +405,27 @@ def attention_forward(
         # for b in range(B):
         for t in range(T):
             for h in range(NH):
-                var query_t: FloatPtr = (
-                    inp + b * T * C3 + t * C3 + h * hs
-                )
+                var query_t: FloatPtr = inp.unsafe_offset(b * T * C3).unsafe_offset(t * C3).unsafe_offset(h * hs)
                 var preatt_bth: FloatPtr = (
-                    preatt + b * NH * T * T + h * T * T + t * T
+                    preatt.unsafe_offset(b * NH * T * T).unsafe_offset(h * T * T).unsafe_offset(t * T)
                 )
-                var att_bth: FloatPtr = (
-                    att + b * NH * T * T + h * T * T + t * T
-                )
+                var att_bth: FloatPtr = att.unsafe_offset(b * NH * T * T).unsafe_offset(h * T * T).unsafe_offset(t * T)
 
                 # pass 1: calculate query dot key and maxval
                 var maxval: FLOAT = FLOAT.MIN_FINITE
 
                 for t2 in range(t + 1):
                     var key_t2: FloatPtr = (
-                        inp + b * T * C3 + t2 * C3 + h * hs + C
+                        inp.unsafe_offset(b * T * C3).unsafe_offset(t2 * C3).unsafe_offset(h * hs).unsafe_offset(C)
                     )  # +C because it's key
 
                     # (query_t) dot (key_t2)
                     var val: FLOAT = 0.0
 
                     def _op[width: Int](iv: Int) {query_t, key_t2, mut val}:
-                        var t = query_t.load[width=width](iv) * key_t2.load[
-                            width=width
-                        ](iv)
+                        var t = query_t.unsafe_load[width=width](
+                            iv
+                        ) * key_t2.unsafe_load[width=width](iv)
                         val += t.reduce_add[1]()
 
                     vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](hs, _op)
@@ -410,15 +434,19 @@ def attention_forward(
                     if val > maxval:
                         maxval = val
 
-                    preatt_bth[t2] = val
+                    preatt_bth[unsafe_offset=t2] = val
 
                 # pass 2: calculate the exp and keep track of sum
                 var expsum: FLOAT = 0.0
 
-                def _op2[width: Int](iv: Int) {preatt_bth, maxval, att_bth, mut expsum}:
-                    var expv = exp(preatt_bth.load[width=width](iv) - maxval)
+                def _op2[
+                    width: Int
+                ](iv: Int) {preatt_bth, maxval, att_bth, mut expsum}:
+                    var expv = exp(
+                        preatt_bth.unsafe_load[width=width](iv) - maxval
+                    )
                     expsum += expv.reduce_add[1]()
-                    att_bth.store(iv, expv)
+                    att_bth.unsafe_store(iv, expv)
 
                 vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](t + 1, _op2)
 
@@ -429,32 +457,32 @@ def attention_forward(
                 # pass 3: normalize to get the softmax
 
                 def _op3[width: Int](t2: Int) {att_bth, expsum_inv}:
-                    att_bth.store(
-                        t2, att_bth.load[width=width](t2) * expsum_inv
+                    att_bth.unsafe_store(
+                        t2, att_bth.unsafe_load[width=width](t2) * expsum_inv
                     )
 
                 vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](t + 1, _op3)
-                memset_zero(att_bth + t + 1, T - t - 1)
+                unsafe_memset_zero(att_bth.unsafe_offset(t).unsafe_offset(1), T - t - 1)
 
                 # pass 4: accumulate weighted values into the output of attention
-                var out_bth: FloatPtr = (
-                    vout + b * T * C + t * C + h * hs
-                )
+                var out_bth: FloatPtr = vout.unsafe_offset(b * T * C).unsafe_offset(t * C).unsafe_offset(h * hs)
                 # for i in range(hs):
                 #    out_bth[i] = 0.0
-                memset_zero(out_bth, hs)
+                unsafe_memset_zero(out_bth, hs)
 
                 for t2 in range(t + 1):
                     var value_t2 = (
-                        inp + b * T * C3 + t2 * C3 + h * hs + C * 2
+                        inp.unsafe_offset(b * T * C3).unsafe_offset(t2 * C3).unsafe_offset(h * hs).unsafe_offset(C * 2)
                     )  # +C*2 because it's value
-                    var att_btht2: FLOAT = att_bth[t2]
+                    var att_btht2: FLOAT = att_bth[unsafe_offset=t2]
 
-                    def _op4[width: Int](iv: Int) {out_bth, att_btht2, value_t2}:
-                        out_bth.store(
+                    def _op4[
+                        width: Int
+                    ](iv: Int) {out_bth, att_btht2, value_t2}:
+                        out_bth.unsafe_store(
                             iv,
-                            out_bth.load[width=width](iv)
-                            + att_btht2 * value_t2.load[width=width](iv),
+                            out_bth.unsafe_load[width=width](iv)
+                            + att_btht2 * value_t2.unsafe_load[width=width](iv),
                         )
 
                     vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](hs, _op4)
@@ -485,47 +513,44 @@ def attention_backward(
     def _calc(b: Int):
         for t in range(T):
             for h in range(NH):
-                var att_bth: FloatPtr = (
-                    att + b * NH * T * T + h * T * T + t * T
-                )
+                var att_bth: FloatPtr = att.unsafe_offset(b * NH * T * T).unsafe_offset(h * T * T).unsafe_offset(t * T)
                 var datt_bth: FloatPtr = (
-                    datt + b * NH * T * T + h * T * T + t * T
+                    datt.unsafe_offset(b * NH * T * T).unsafe_offset(h * T * T).unsafe_offset(t * T)
                 )
                 var dpreatt_bth: FloatPtr = (
-                    dpreatt + b * NH * T * T + h * T * T + t * T
+                    dpreatt.unsafe_offset(b * NH * T * T).unsafe_offset(h * T * T).unsafe_offset(t * T)
                 )
-                var dquery_t: FloatPtr = (
-                    dinp + b * T * C3 + t * C3 + h * hs
-                )
-                var query_t: FloatPtr = (
-                    inp + b * T * C3 + t * C3 + h * hs
-                )
+                var dquery_t: FloatPtr = dinp.unsafe_offset(b * T * C3).unsafe_offset(t * C3).unsafe_offset(h * hs)
+                var query_t: FloatPtr = inp.unsafe_offset(b * T * C3).unsafe_offset(t * C3).unsafe_offset(h * hs)
 
                 # backward pass 4, through the value accumulation
-                var dout_bth: FloatPtr = (
-                    dout + b * T * C + t * C + h * hs
-                )
+                var dout_bth: FloatPtr = dout.unsafe_offset(b * T * C).unsafe_offset(t * C).unsafe_offset(h * hs)
                 for t2 in range(t + 1):
                     var value_t2: FloatPtr = (
-                        inp + b * T * C3 + t2 * C3 + h * hs + C * 2
+                        inp.unsafe_offset(b * T * C3).unsafe_offset(t2 * C3).unsafe_offset(h * hs).unsafe_offset(C * 2)
                     )  # +C*2 because it's value
                     var dvalue_t2: FloatPtr = (
-                        dinp + b * T * C3 + t2 * C3 + h * hs + C * 2
+                        dinp.unsafe_offset(b * T * C3).unsafe_offset(t2 * C3).unsafe_offset(h * hs).unsafe_offset(C * 2)
                     )
 
-                    def _op[width: Int](iv: Int) {datt_bth, value_t2, dout_bth, dvalue_t2, att_bth, t2}:
+                    def _op[
+                        width: Int
+                    ](iv: Int) {
+                        datt_bth, value_t2, dout_bth, dvalue_t2, att_bth, t2
+                    }:
                         # for i in range(hs):
                         # in the forward pass this was:
                         # out_bth[i] += att_bth[t2] * value_t2[i]
                         # so now we have:
-                        datt_bth[t2] += (
-                            value_t2.load[width=width](iv)
-                            * dout_bth.load[width=width](iv)
+                        datt_bth[unsafe_offset=t2] += (
+                            value_t2.unsafe_load[width=width](iv)
+                            * dout_bth.unsafe_load[width=width](iv)
                         ).reduce_add[1]()
-                        dvalue_t2.store(
+                        dvalue_t2.unsafe_store(
                             iv,
-                            dvalue_t2.load[width=width](iv)
-                            + att_bth[t2] * dout_bth.load[width=width](iv),
+                            dvalue_t2.unsafe_load[width=width](iv)
+                            + att_bth[unsafe_offset=t2]
+                            * dout_bth.unsafe_load[width=width](iv),
                         )
 
                     vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](hs, _op)
@@ -534,45 +559,59 @@ def attention_backward(
                 # note that softmax (like e.g. tanh) doesn't need the input (preatt) to backward
                 for t2 in range(t + 1):
 
-                    def _op3[width: Int](t3: Int) {att_bth, t2, dpreatt_bth, datt_bth}:
-                        var local_derivative = -att_bth[t2] * att_bth.load[
-                            width=width
-                        ](t3)
-                        dpreatt_bth.store(
+                    def _op3[
+                        width: Int
+                    ](t3: Int) {att_bth, t2, dpreatt_bth, datt_bth}:
+                        var local_derivative = -att_bth[
+                            unsafe_offset=t2
+                        ] * att_bth.unsafe_load[width=width](t3)
+                        dpreatt_bth.unsafe_store(
                             t3,
-                            dpreatt_bth.load[width=width](t3)
-                            + local_derivative * datt_bth[t2],
+                            dpreatt_bth.unsafe_load[width=width](t3)
+                            + local_derivative * datt_bth[unsafe_offset=t2],
                         )
 
-                    vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](t + 1, _op3)
-                    dpreatt_bth[t2] += att_bth[t2] * datt_bth[t2]
+                    vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](
+                        t + 1, _op3
+                    )
+                    dpreatt_bth[unsafe_offset=t2] += att_bth[unsafe_offset=t2] * datt_bth[unsafe_offset=t2]
 
                 # backward pass 1, the query @ key matmul
                 for t2 in range(t + 1):
                     var key_t2: FloatPtr = (
-                        inp + b * T * C3 + t2 * C3 + h * hs + C
+                        inp.unsafe_offset(b * T * C3).unsafe_offset(t2 * C3).unsafe_offset(h * hs).unsafe_offset(C)
                     )  # +C because it's key
                     var dkey_t2: FloatPtr = (
-                        dinp + b * T * C3 + t2 * C3 + h * hs + C
+                        dinp.unsafe_offset(b * T * C3).unsafe_offset(t2 * C3).unsafe_offset(h * hs).unsafe_offset(C)
                     )  # +C because it's key
 
-                    def _op2[width: Int](iv: Int) {dquery_t, key_t2, dpreatt_bth, t2, scale, dkey_t2, query_t}:
+                    def _op2[
+                        width: Int
+                    ](iv: Int) {
+                        dquery_t,
+                        key_t2,
+                        dpreatt_bth,
+                        t2,
+                        scale,
+                        dkey_t2,
+                        query_t,
+                    }:
                         # for i in range(hs):
                         # in the forward pass this was:
                         # preatt_bth[t2] += (query_t[i] * key_t2[i]) * scale
                         # so now we have:
-                        dquery_t.store(
+                        dquery_t.unsafe_store(
                             iv,
-                            dquery_t.load[width=width](iv)
-                            + key_t2.load[width=width](iv)
-                            * dpreatt_bth[t2]
+                            dquery_t.unsafe_load[width=width](iv)
+                            + key_t2.unsafe_load[width=width](iv)
+                            * dpreatt_bth[unsafe_offset=t2]
                             * scale,
                         )
-                        dkey_t2.store(
+                        dkey_t2.unsafe_store(
                             iv,
-                            dkey_t2.load[width=width](iv)
-                            + query_t.load[width=width](iv)
-                            * dpreatt_bth[t2]
+                            dkey_t2.unsafe_load[width=width](iv)
+                            + query_t.unsafe_load[width=width](iv)
+                            * dpreatt_bth[unsafe_offset=t2]
                             * scale,
                         )
 
@@ -595,9 +634,9 @@ def gelu_forward(
         def _op[width: Int](_iv: Int) {ip, num_vectorize, inp, s, vout}:
             var iv = ip * num_vectorize + _iv
 
-            var x = inp.load[width=width](iv)
+            var x = inp.unsafe_load[width=width](iv)
             var cube = 0.044715 * pow(x, 3)
-            vout.store(iv, 0.5 * x * (1.0 + tanh(s * (x + cube))))
+            vout.unsafe_store(iv, 0.5 * x * (1.0 + tanh(s * (x + cube))))
 
         vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](num_vectorize, _op)
 
@@ -618,7 +657,7 @@ def gelu_backward(
         def _op[width: Int](_iv: Int) {ip, num_vectorize, inp, s, dinp, dout}:
             var iv = ip * num_vectorize + _iv
 
-            var x = inp.load[width=width](iv)
+            var x = inp.unsafe_load[width=width](iv)
             var cube = 0.044715 * pow(x, 3)
             var tanh_arg = s * (x + cube)
             var tanh_out = tanh(tanh_arg)
@@ -627,10 +666,10 @@ def gelu_backward(
             var local_grad = 0.5 * (1.0 + tanh_out) + x * 0.5 * sech_out * s * (
                 1.0 + 3.0 * 0.044715 * x * x
             )
-            dinp.store(
+            dinp.unsafe_store(
                 iv,
-                dinp.load[width=width](iv)
-                + local_grad * dout.load[width=width](iv),
+                dinp.unsafe_load[width=width](iv)
+                + local_grad * dout.unsafe_load[width=width](iv),
             )
 
         vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](num_vectorize, _op)
@@ -650,8 +689,10 @@ def residual_forward(
     def _calc(ip: Int):
         def _op[width: Int](_iv: Int) {ip, num_vectorize, vout, inp1, inp2}:
             var iv = ip * num_vectorize + _iv
-            vout.store(
-                iv, inp1.load[width=width](iv) + inp2.load[width=width](iv)
+            vout.unsafe_store(
+                iv,
+                inp1.unsafe_load[width=width](iv)
+                + inp2.unsafe_load[width=width](iv),
             )  # scale and shift it
 
         vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](num_vectorize, _op)
@@ -672,11 +713,15 @@ def residual_backward(
         def _op[width: Int](_iv: Int) {ip, num_vectorize, dinp1, dinp2, dout}:
             var iv = ip * num_vectorize + _iv
 
-            dinp1.store(
-                iv, dinp1.load[width=width](iv) + dout.load[width=width](iv)
+            dinp1.unsafe_store(
+                iv,
+                dinp1.unsafe_load[width=width](iv)
+                + dout.unsafe_load[width=width](iv),
             )  # scale and shift it
-            dinp2.store(
-                iv, dinp2.load[width=width](iv) + dout.load[width=width](iv)
+            dinp2.unsafe_store(
+                iv,
+                dinp2.unsafe_load[width=width](iv)
+                + dout.unsafe_load[width=width](iv),
             )  # scale and shift it
 
         vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](num_vectorize, _op)
@@ -702,31 +747,27 @@ def softmax_forward(
         # for b in range(B):
         for t in range(T):
             # probs <- softmax(logits)
-            var logits_bt: FloatPtr = (
-                logits + b * T * Vp + t * Vp
-            )
-            var probs_bt: FloatPtr = (
-                probs + b * T * Vp + t * Vp
-            )
+            var logits_bt: FloatPtr = logits.unsafe_offset(b * T * Vp).unsafe_offset(t * Vp)
+            var probs_bt: FloatPtr = probs.unsafe_offset(b * T * Vp).unsafe_offset(t * Vp)
 
             var maxval: FLOAT = FLOAT.MIN_FINITE
             for i in range(V):
-                if logits_bt[i] > maxval:
-                    maxval = logits_bt[i]
+                if logits_bt[unsafe_offset=i] > maxval:
+                    maxval = logits_bt[unsafe_offset=i]
 
             var sum: FLOAT = 0.0
 
             def _op[width: Int](iv: Int) {probs_bt, logits_bt, maxval, mut sum}:
-                probs_bt.store(
-                    iv, exp(logits_bt.load[width=width](iv) - maxval)
+                probs_bt.unsafe_store(
+                    iv, exp(logits_bt.unsafe_load[width=width](iv) - maxval)
                 )
-                sum += probs_bt.load[width=width](iv).reduce_add[1]()
+                sum += probs_bt.unsafe_load[width=width](iv).reduce_add[1]()
 
             vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](V, _op)
 
             def _op2[width: Int](iv: Int) {probs_bt, sum}:
-                probs_bt.store(
-                    iv, probs_bt.load[width=width](iv) / sum
+                probs_bt.unsafe_store(
+                    iv, probs_bt.unsafe_load[width=width](iv) / sum
                 )  # scale and shift it
 
             vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](V, _op2)
@@ -734,7 +775,7 @@ def softmax_forward(
             # for extra super safety we may wish to include this too,
             # forcing the probabilities here to be zero, but it shouldn't matter
 
-            memset_zero(probs_bt + V, Vp - V)
+            unsafe_memset_zero(probs_bt.unsafe_offset(V), Vp - V)
 
     parallelize[_calc](B)
 
@@ -755,11 +796,9 @@ def crossentropy_forward(
     def _calc(b: Int):
         for t in range(T):  # todo
             # loss = -log(probs[target])
-            var probs_bt: FloatPtr = (
-                probs + b * T * Vp + t * Vp
-            )
-            var ix = targets[b * T + t]
-            losses[b * T + t] = -log(probs_bt.load(ix))
+            var probs_bt: FloatPtr = probs.unsafe_offset(b * T * Vp).unsafe_offset(t * Vp)
+            var ix = targets[unsafe_offset=b * T + t]
+            losses[unsafe_offset=b * T + t] = -log(probs_bt.unsafe_load(ix))
 
     parallelize[_calc](B)
 
@@ -779,26 +818,22 @@ def crossentropy_softmax_backward(
     @parameter
     def _calc(b: Int):
         for t in range(T):
-            var dlogits_bt: FloatPtr = (
-                dlogits + b * T * Vp + t * Vp
-            )
-            var probs_bt: FloatPtr = (
-                probs + b * T * Vp + t * Vp
-            )
-            var dloss: FLOAT = dlosses[b * T + t]
-            var ix = targets[b * T + t]
+            var dlogits_bt: FloatPtr = dlogits.unsafe_offset(b * T * Vp).unsafe_offset(t * Vp)
+            var probs_bt: FloatPtr = probs.unsafe_offset(b * T * Vp).unsafe_offset(t * Vp)
+            var dloss: FLOAT = dlosses[unsafe_offset=b * T + t]
+            var ix = targets[unsafe_offset=b * T + t]
 
             def _op[width: Int](iv: Int) {dlogits_bt, probs_bt, dloss}:
-                dlogits_bt.store(
+                dlogits_bt.unsafe_store(
                     iv,
-                    dlogits_bt.load[width=width](iv)
-                    + probs_bt.load[width=width](iv) * dloss,
+                    dlogits_bt.unsafe_load[width=width](iv)
+                    + probs_bt.unsafe_load[width=width](iv) * dloss,
                 )
 
             vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](V, _op)
 
             if ix >= 0 and ix < INT(V):
-                dlogits_bt.store(ix, dlogits_bt.load(ix) - dloss)
+                dlogits_bt.unsafe_store(ix, dlogits_bt.unsafe_load(ix) - dloss)
 
     parallelize[_calc](B)
 
@@ -841,40 +876,40 @@ struct ParameterTensors(Copyable, Movable):
             num_parameters += param_sizes[i]
 
         # malloc all parameters all at once
-        self.params_memory = alloc[Scalar[dtype]](num_parameters)
+        self.params_memory = unsafe_alloc[Scalar[dtype]](num_parameters)
 
         # assign all the tensors
         var it: FloatPtr = self.params_memory
         self.wte = it
-        it += param_sizes[0]
+        it = it.unsafe_offset(param_sizes[0])
         self.wpe = it
-        it += param_sizes[1]
+        it = it.unsafe_offset(param_sizes[1])
         self.ln1w = it
-        it += param_sizes[2]
+        it = it.unsafe_offset(param_sizes[2])
         self.ln1b = it
-        it += param_sizes[3]
+        it = it.unsafe_offset(param_sizes[3])
         self.qkvw = it
-        it += param_sizes[4]
+        it = it.unsafe_offset(param_sizes[4])
         self.qkvb = it
-        it += param_sizes[5]
+        it = it.unsafe_offset(param_sizes[5])
         self.attprojw = it
-        it += param_sizes[6]
+        it = it.unsafe_offset(param_sizes[6])
         self.attprojb = it
-        it += param_sizes[7]
+        it = it.unsafe_offset(param_sizes[7])
         self.ln2w = it
-        it += param_sizes[8]
+        it = it.unsafe_offset(param_sizes[8])
         self.ln2b = it
-        it += param_sizes[9]
+        it = it.unsafe_offset(param_sizes[9])
         self.fcw = it
-        it += param_sizes[10]
+        it = it.unsafe_offset(param_sizes[10])
         self.fcb = it
-        it += param_sizes[11]
+        it = it.unsafe_offset(param_sizes[11])
         self.fcprojw = it
-        it += param_sizes[12]
+        it = it.unsafe_offset(param_sizes[12])
         self.fcprojb = it
-        it += param_sizes[13]
+        it = it.unsafe_offset(param_sizes[13])
         self.lnfw = it
-        it += param_sizes[14]
+        it = it.unsafe_offset(param_sizes[14])
         self.lnfb = it
 
 
@@ -918,54 +953,54 @@ struct ActivationTensors(Copyable, Movable):
             num_activations += act_sizes[i]
 
         # malloc all activations all at once
-        self.acts_memory = alloc[Scalar[dtype]](num_activations)
+        self.acts_memory = unsafe_alloc[Scalar[dtype]](num_activations)
 
         # assign all the tensors
         var it: FloatPtr = self.acts_memory
         self.encoded = it
-        it += act_sizes[0]
+        it = it.unsafe_offset(act_sizes[0])
         self.ln1 = it
-        it += act_sizes[1]
+        it = it.unsafe_offset(act_sizes[1])
         self.ln1_mean = it
-        it += act_sizes[2]
+        it = it.unsafe_offset(act_sizes[2])
         self.ln1_rstd = it
-        it += act_sizes[3]
+        it = it.unsafe_offset(act_sizes[3])
         self.qkv = it
-        it += act_sizes[4]
+        it = it.unsafe_offset(act_sizes[4])
         self.atty = it
-        it += act_sizes[5]
+        it = it.unsafe_offset(act_sizes[5])
         self.preatt = it
-        it += act_sizes[6]
+        it = it.unsafe_offset(act_sizes[6])
         self.att = it
-        it += act_sizes[7]
+        it = it.unsafe_offset(act_sizes[7])
         self.attproj = it
-        it += act_sizes[8]
+        it = it.unsafe_offset(act_sizes[8])
         self.residual2 = it
-        it += act_sizes[9]
+        it = it.unsafe_offset(act_sizes[9])
         self.ln2 = it
-        it += act_sizes[10]
+        it = it.unsafe_offset(act_sizes[10])
         self.ln2_mean = it
-        it += act_sizes[11]
+        it = it.unsafe_offset(act_sizes[11])
         self.ln2_rstd = it
-        it += act_sizes[12]
+        it = it.unsafe_offset(act_sizes[12])
         self.fch = it
-        it += act_sizes[13]
+        it = it.unsafe_offset(act_sizes[13])
         self.fch_gelu = it
-        it += act_sizes[14]
+        it = it.unsafe_offset(act_sizes[14])
         self.fcproj = it
-        it += act_sizes[15]
+        it = it.unsafe_offset(act_sizes[15])
         self.residual3 = it
-        it += act_sizes[16]
+        it = it.unsafe_offset(act_sizes[16])
         self.lnf = it
-        it += act_sizes[17]
+        it = it.unsafe_offset(act_sizes[17])
         self.lnf_mean = it
-        it += act_sizes[18]
+        it = it.unsafe_offset(act_sizes[18])
         self.lnf_rstd = it
-        it += act_sizes[19]
+        it = it.unsafe_offset(act_sizes[19])
         self.logits = it
-        it += act_sizes[20]
+        it = it.unsafe_offset(act_sizes[20])
         self.probs = it
-        it += act_sizes[21]
+        it = it.unsafe_offset(act_sizes[21])
         self.losses = it
 
 
@@ -1000,8 +1035,12 @@ struct GPT2:
     # other run state configuration
     var batch_size: Int  # the batch size (B) of current forward pass
     var seq_len: Int  # the sequence length (T) of current forward pass
-    var inputs: Optional[IntPtr]  # the input tokens for the current forward pass
-    var targets: Optional[IntPtr]  # the target tokens for the current forward pass
+    var inputs: Optional[
+        IntPtr
+    ]  # the input tokens for the current forward pass
+    var targets: Optional[
+        IntPtr
+    ]  # the target tokens for the current forward pass
     var mean_loss: FLOAT  # after a forward pass with targets, will be populated with the mean loss
     var checkpoint_path: String
 
@@ -1011,8 +1050,8 @@ struct GPT2:
         self.param_sizes = InlineArray[Int, NUM_PARAMETER_TENSORS](fill=0)
         self.act_sizes = InlineArray[Int, NUM_ACTIVATION_TENSORS](fill=0)
 
-        model_file = open(checkpoint_path, "r")
-        model_header = InlineArray[Int32, 256](fill=0)
+        var model_file = open(checkpoint_path, "r")
+        var model_header = InlineArray[Int32, 256](fill=0)
 
         read_to_buf(model_header, model_file)
 
@@ -1096,7 +1135,6 @@ struct GPT2:
 
         print("num_parameters:", num_parameters)
 
-
     def forward(
         mut self,
         inputs: IntPtr,
@@ -1154,21 +1192,23 @@ struct GPT2:
             self.num_activations = num_activations
             # also create memory for caching inputs and targets
 
-            self.inputs = alloc[Scalar[dtype_int]](B * T)
-            self.targets = alloc[Scalar[dtype_int]](B * T)
+            self.inputs = unsafe_alloc[Scalar[dtype_int]](B * T)
+            self.targets = unsafe_alloc[Scalar[dtype_int]](B * T)
 
         else:
             # validate B,T is no larger than what was previously allocated
             # in principle, we could re-allocate a larger chunk of memory, for now we just error out
             if B > self.batch_size or T > self.seq_len:
-                print("Error: batch size or sequence length is inadequately large")
+                print(
+                    "Error: batch size or sequence length is inadequately large"
+                )
                 # print("Model: B=%d T=%d, Desired: B=%d T=%d\n", self.batch_size, self.seq_len, B, T)
 
         # cache the inputs/targets
-        memcpy(dest=self.inputs.value(), src=inputs, count=B * T)
+        unsafe_memcpy(dest=self.inputs.value(), src=inputs, count=B * T)
 
         if targets:
-            memcpy(dest=self.targets.value(), src=targets.value(), count=B * T)
+            unsafe_memcpy(dest=self.targets.value(), src=targets.value(), count=B * T)
 
         # forward pass
 
@@ -1179,82 +1219,42 @@ struct GPT2:
         )  # encoding goes into residual[0]
 
         for l in range(L):
-            residual = acts.residual3 + (l - 1) * B * T * C
+            residual = acts.residual3.unsafe_offset((l - 1) * B * T * C)
 
             if l == 0:
                 residual = acts.encoded
 
             # get the pointers of the weights for this layer
-            var l_ln1w: FloatPtr = self.params.ln1w + l * C
-            var l_ln1b: FloatPtr = self.params.ln1b + l * C
-            var l_qkvw: FloatPtr = (
-                self.params.qkvw + l * 3 * C * C
-            )
-            var l_qkvb: FloatPtr = self.params.qkvb + l * 3 * C
-            var l_attprojw: FloatPtr = (
-                self.params.attprojw + l * C * C
-            )
-            var l_attprojb: FloatPtr = (
-                self.params.attprojb + l * C
-            )
-            var l_ln2w: FloatPtr = self.params.ln2w + l * C
-            var l_ln2b: FloatPtr = self.params.ln2b + l * C
-            var l_fcw: FloatPtr = (
-                self.params.fcw + l * 4 * C * C
-            )
-            var l_fcb: FloatPtr = self.params.fcb + l * 4 * C
-            var l_fcprojw: FloatPtr = (
-                self.params.fcprojw + l * C * 4 * C
-            )
-            var l_fcprojb: FloatPtr = (
-                self.params.fcprojb + l * C
-            )
+            var l_ln1w: FloatPtr = self.params.ln1w.unsafe_offset(l * C)
+            var l_ln1b: FloatPtr = self.params.ln1b.unsafe_offset(l * C)
+            var l_qkvw: FloatPtr = self.params.qkvw.unsafe_offset(l * 3 * C * C)
+            var l_qkvb: FloatPtr = self.params.qkvb.unsafe_offset(l * 3 * C)
+            var l_attprojw: FloatPtr = self.params.attprojw.unsafe_offset(l * C * C)
+            var l_attprojb: FloatPtr = self.params.attprojb.unsafe_offset(l * C)
+            var l_ln2w: FloatPtr = self.params.ln2w.unsafe_offset(l * C)
+            var l_ln2b: FloatPtr = self.params.ln2b.unsafe_offset(l * C)
+            var l_fcw: FloatPtr = self.params.fcw.unsafe_offset(l * 4 * C * C)
+            var l_fcb: FloatPtr = self.params.fcb.unsafe_offset(l * 4 * C)
+            var l_fcprojw: FloatPtr = self.params.fcprojw.unsafe_offset(l * C * 4 * C)
+            var l_fcprojb: FloatPtr = self.params.fcprojb.unsafe_offset(l * C)
 
             # get the pointers of the activations for this layer
-            var l_ln1: FloatPtr = acts.ln1 + l * B * T * C
-            var l_ln1_mean: FloatPtr = (
-                acts.ln1_mean + l * B * T
-            )
-            var l_ln1_rstd: FloatPtr = (
-                acts.ln1_rstd + l * B * T
-            )
-            var l_qkv: FloatPtr = (
-                acts.qkv + l * B * T * 3 * C
-            )
-            var l_atty: FloatPtr = (
-                acts.atty + l * B * T * C
-            )
-            var l_preatt: FloatPtr = (
-                acts.preatt + l * B * NH * T * T
-            )
-            var l_att: FloatPtr = (
-                acts.att + l * B * NH * T * T
-            )
-            var l_attproj: FloatPtr = (
-                acts.attproj + l * B * T * C
-            )
-            var l_residual2: FloatPtr = (
-                acts.residual2 + l * B * T * C
-            )
-            var l_ln2: FloatPtr = acts.ln2 + l * B * T * C
-            var l_ln2_mean: FloatPtr = (
-                acts.ln2_mean + l * B * T
-            )
-            var l_ln2_rstd: FloatPtr = (
-                acts.ln2_rstd + l * B * T
-            )
-            var l_fch: FloatPtr = (
-                acts.fch + l * B * T * 4 * C
-            )
-            var l_fch_gelu: FloatPtr = (
-                acts.fch_gelu + l * B * T * 4 * C
-            )
-            var l_fcproj: FloatPtr = (
-                acts.fcproj + l * B * T * C
-            )
-            var l_residual3: FloatPtr = (
-                acts.residual3 + l * B * T * C
-            )
+            var l_ln1: FloatPtr = acts.ln1.unsafe_offset(l * B * T * C)
+            var l_ln1_mean: FloatPtr = acts.ln1_mean.unsafe_offset(l * B * T)
+            var l_ln1_rstd: FloatPtr = acts.ln1_rstd.unsafe_offset(l * B * T)
+            var l_qkv: FloatPtr = acts.qkv.unsafe_offset(l * B * T * 3 * C)
+            var l_atty: FloatPtr = acts.atty.unsafe_offset(l * B * T * C)
+            var l_preatt: FloatPtr = acts.preatt.unsafe_offset(l * B * NH * T * T)
+            var l_att: FloatPtr = acts.att.unsafe_offset(l * B * NH * T * T)
+            var l_attproj: FloatPtr = acts.attproj.unsafe_offset(l * B * T * C)
+            var l_residual2: FloatPtr = acts.residual2.unsafe_offset(l * B * T * C)
+            var l_ln2: FloatPtr = acts.ln2.unsafe_offset(l * B * T * C)
+            var l_ln2_mean: FloatPtr = acts.ln2_mean.unsafe_offset(l * B * T)
+            var l_ln2_rstd: FloatPtr = acts.ln2_rstd.unsafe_offset(l * B * T)
+            var l_fch: FloatPtr = acts.fch.unsafe_offset(l * B * T * 4 * C)
+            var l_fch_gelu: FloatPtr = acts.fch_gelu.unsafe_offset(l * B * T * 4 * C)
+            var l_fcproj: FloatPtr = acts.fcproj.unsafe_offset(l * B * T * C)
+            var l_residual3: FloatPtr = acts.residual3.unsafe_offset(l * B * T * C)
 
             # now do the forward pass
 
@@ -1263,10 +1263,20 @@ struct GPT2:
             )
             matmul_forward(l_qkv, l_ln1, l_qkvw, l_qkvb, B, T, C, 3 * C)
             attention_forward(l_atty, l_preatt, l_att, l_qkv, B, T, C, NH)
-            matmul_forward(l_attproj, l_atty, l_attprojw, l_attprojb, B, T, C, C)
+            matmul_forward(
+                l_attproj, l_atty, l_attprojw, l_attprojb, B, T, C, C
+            )
             residual_forward(l_residual2, residual, l_attproj, B * T * C)
             layernorm_forward(
-                l_ln2, l_ln2_mean, l_ln2_rstd, l_residual2, l_ln2w, l_ln2b, B, T, C
+                l_ln2,
+                l_ln2_mean,
+                l_ln2_rstd,
+                l_residual2,
+                l_ln2w,
+                l_ln2b,
+                B,
+                T,
+                C,
             )
             matmul_forward(l_fch, l_ln2, l_fcw, l_fcb, B, T, C, 4 * C)
             gelu_forward(l_fch_gelu, l_fch, B * T * 4 * C)
@@ -1276,7 +1286,7 @@ struct GPT2:
             residual_forward(l_residual3, l_residual2, l_fcproj, B * T * C)
 
         residual = (
-            acts.residual3 + (L - 1) * B * T * C
+            acts.residual3.unsafe_offset((L - 1) * B * T * C)
         )  # last residual is in residual3
         layernorm_forward(
             acts.lnf,
@@ -1302,21 +1312,21 @@ struct GPT2:
             # for convenience also evaluate the mean loss
             var mean_loss: FLOAT = 0.0
             for i in range(B * T):
-                mean_loss += acts.losses[i]
+                mean_loss += acts.losses[unsafe_offset=i]
             mean_loss /= FLOAT(B * T)
             self.mean_loss = mean_loss
         else:
             # if we don't have targets, we don't have a loss
             self.mean_loss = -1.0
 
-
     def zero_grad(mut self):
         if self.grads:
-            memset_zero(self.grads.value().params_memory, self.num_parameters)
+            unsafe_memset_zero(self.grads.value().params_memory, self.num_parameters)
 
         if self.grads_acts:
-            memset_zero(self.grads_acts.value().acts_memory, self.num_activations)
-
+            unsafe_memset_zero(
+                self.grads_acts.value().acts_memory, self.num_activations
+            )
 
     def backward(mut self):
         # double check we forwarded previously, with targets
@@ -1353,7 +1363,7 @@ struct GPT2:
 
         # Fill the gradient losses with the mean loss value
         def _fill_losses[width: Int](i: Int) {grads_acts, dloss_mean}:
-            grads_acts.losses.store[width=width](i, dloss_mean)
+            grads_acts.losses.unsafe_store[width=width](i, dloss_mean)
 
         vectorize[SIMD_WIDTH](B * T, _fill_losses)
 
@@ -1380,10 +1390,10 @@ struct GPT2:
             Vp,
         )
         var residual: FloatPtr = (
-            acts.residual3 + (L - 1) * B * T * C
+            acts.residual3.unsafe_offset((L - 1) * B * T * C)
         )  # last layer's residual
         var dresidual: FloatPtr = (
-            grads_acts.residual3 + (L - 1) * B * T * C
+            grads_acts.residual3.unsafe_offset((L - 1) * B * T * C)
         )  # write to last layer's residual
         layernorm_backward(
             dresidual,
@@ -1403,119 +1413,55 @@ struct GPT2:
             var residual = acts.encoded
             var dresidual = grads_acts.encoded
             if l != 0:
-                residual = acts.residual3 + (l - 1) * B * T * C
-                dresidual = grads_acts.residual3 + (l - 1) * B * T * C
+                residual = acts.residual3.unsafe_offset((l - 1) * B * T * C)
+                dresidual = grads_acts.residual3.unsafe_offset((l - 1) * B * T * C)
 
             # get the pointers of the weights for this layer
-            var l_ln1w: FloatPtr = self.params.ln1w + l * C
-            var l_qkvw: FloatPtr = (
-                self.params.qkvw + l * 3 * C * C
-            )
-            var l_attprojw: FloatPtr = (
-                self.params.attprojw + l * C * C
-            )
-            var l_ln2w: FloatPtr = self.params.ln2w + l * C
-            var l_fcw: FloatPtr = (
-                self.params.fcw + l * 4 * C * C
-            )
-            var l_fcprojw: FloatPtr = (
-                self.params.fcprojw + l * C * 4 * C
-            )
+            var l_ln1w: FloatPtr = self.params.ln1w.unsafe_offset(l * C)
+            var l_qkvw: FloatPtr = self.params.qkvw.unsafe_offset(l * 3 * C * C)
+            var l_attprojw: FloatPtr = self.params.attprojw.unsafe_offset(l * C * C)
+            var l_ln2w: FloatPtr = self.params.ln2w.unsafe_offset(l * C)
+            var l_fcw: FloatPtr = self.params.fcw.unsafe_offset(l * 4 * C * C)
+            var l_fcprojw: FloatPtr = self.params.fcprojw.unsafe_offset(l * C * 4 * C)
             # get the pointers of the gradients of the weights for this layer
-            var dl_ln1w: FloatPtr = grads.ln1w + l * C
-            var dl_ln1b: FloatPtr = grads.ln1b + l * C
-            var dl_qkvw: FloatPtr = (
-                grads.qkvw + l * 3 * C * C
-            )
-            var dl_qkvb: FloatPtr = grads.qkvb + l * 3 * C
-            var dl_attprojw: FloatPtr = (
-                grads.attprojw + l * C * C
-            )
-            var dl_attprojb: FloatPtr = (
-                grads.attprojb + l * C
-            )
-            var dl_ln2w: FloatPtr = grads.ln2w + l * C
-            var dl_ln2b: FloatPtr = grads.ln2b + l * C
-            var dl_fcw: FloatPtr = (
-                grads.fcw + l * 4 * C * C
-            )
-            var dl_fcb: FloatPtr = grads.fcb + l * 4 * C
-            var dl_fcprojw: FloatPtr = (
-                grads.fcprojw + l * C * 4 * C
-            )
-            var dl_fcprojb: FloatPtr = (
-                grads.fcprojb + l * C
-            )
+            var dl_ln1w: FloatPtr = grads.ln1w.unsafe_offset(l * C)
+            var dl_ln1b: FloatPtr = grads.ln1b.unsafe_offset(l * C)
+            var dl_qkvw: FloatPtr = grads.qkvw.unsafe_offset(l * 3 * C * C)
+            var dl_qkvb: FloatPtr = grads.qkvb.unsafe_offset(l * 3 * C)
+            var dl_attprojw: FloatPtr = grads.attprojw.unsafe_offset(l * C * C)
+            var dl_attprojb: FloatPtr = grads.attprojb.unsafe_offset(l * C)
+            var dl_ln2w: FloatPtr = grads.ln2w.unsafe_offset(l * C)
+            var dl_ln2b: FloatPtr = grads.ln2b.unsafe_offset(l * C)
+            var dl_fcw: FloatPtr = grads.fcw.unsafe_offset(l * 4 * C * C)
+            var dl_fcb: FloatPtr = grads.fcb.unsafe_offset(l * 4 * C)
+            var dl_fcprojw: FloatPtr = grads.fcprojw.unsafe_offset(l * C * 4 * C)
+            var dl_fcprojb: FloatPtr = grads.fcprojb.unsafe_offset(l * C)
             # get the pointers of the activations for this layer
-            var l_ln1: FloatPtr = acts.ln1 + l * B * T * C
-            var l_ln1_mean: FloatPtr = (
-                acts.ln1_mean + l * B * T
-            )
-            var l_ln1_rstd: FloatPtr = (
-                acts.ln1_rstd + l * B * T
-            )
-            var l_qkv: FloatPtr = (
-                acts.qkv + l * B * T * 3 * C
-            )
-            var l_atty: FloatPtr = (
-                acts.atty + l * B * T * C
-            )
-            var l_att: FloatPtr = (
-                acts.att + l * B * NH * T * T
-            )
-            var l_residual2: FloatPtr = (
-                acts.residual2 + l * B * T * C
-            )
-            var l_ln2: FloatPtr = acts.ln2 + l * B * T * C
-            var l_ln2_mean: FloatPtr = (
-                acts.ln2_mean + l * B * T
-            )
-            var l_ln2_rstd: FloatPtr = (
-                acts.ln2_rstd + l * B * T
-            )
-            var l_fch: FloatPtr = (
-                acts.fch + l * B * T * 4 * C
-            )
-            var l_fch_gelu: FloatPtr = (
-                acts.fch_gelu + l * B * T * 4 * C
-            )
+            var l_ln1: FloatPtr = acts.ln1.unsafe_offset(l * B * T * C)
+            var l_ln1_mean: FloatPtr = acts.ln1_mean.unsafe_offset(l * B * T)
+            var l_ln1_rstd: FloatPtr = acts.ln1_rstd.unsafe_offset(l * B * T)
+            var l_qkv: FloatPtr = acts.qkv.unsafe_offset(l * B * T * 3 * C)
+            var l_atty: FloatPtr = acts.atty.unsafe_offset(l * B * T * C)
+            var l_att: FloatPtr = acts.att.unsafe_offset(l * B * NH * T * T)
+            var l_residual2: FloatPtr = acts.residual2.unsafe_offset(l * B * T * C)
+            var l_ln2: FloatPtr = acts.ln2.unsafe_offset(l * B * T * C)
+            var l_ln2_mean: FloatPtr = acts.ln2_mean.unsafe_offset(l * B * T)
+            var l_ln2_rstd: FloatPtr = acts.ln2_rstd.unsafe_offset(l * B * T)
+            var l_fch: FloatPtr = acts.fch.unsafe_offset(l * B * T * 4 * C)
+            var l_fch_gelu: FloatPtr = acts.fch_gelu.unsafe_offset(l * B * T * 4 * C)
             # get the pointers of the gradients of the activations for this layer
-            var dl_ln1: FloatPtr = (
-                grads_acts.ln1 + l * B * T * C
-            )
-            var dl_qkv: FloatPtr = (
-                grads_acts.qkv + l * B * T * 3 * C
-            )
-            var dl_atty: FloatPtr = (
-                grads_acts.atty + l * B * T * C
-            )
-            var dl_preatt: FloatPtr = (
-                grads_acts.preatt + l * B * NH * T * T
-            )
-            var dl_att: FloatPtr = (
-                grads_acts.att + l * B * NH * T * T
-            )
-            var dl_attproj: FloatPtr = (
-                grads_acts.attproj + l * B * T * C
-            )
-            var dl_residual2: FloatPtr = (
-                grads_acts.residual2 + l * B * T * C
-            )
-            var dl_ln2: FloatPtr = (
-                grads_acts.ln2 + l * B * T * C
-            )
-            var dl_fch: FloatPtr = (
-                grads_acts.fch + l * B * T * 4 * C
-            )
-            var dl_fch_gelu: FloatPtr = (
-                grads_acts.fch_gelu + l * B * T * 4 * C
-            )
-            var dl_fcproj: FloatPtr = (
-                grads_acts.fcproj + l * B * T * C
-            )
-            var dl_residual3: FloatPtr = (
-                grads_acts.residual3 + l * B * T * C
-            )
+            var dl_ln1: FloatPtr = grads_acts.ln1.unsafe_offset(l * B * T * C)
+            var dl_qkv: FloatPtr = grads_acts.qkv.unsafe_offset(l * B * T * 3 * C)
+            var dl_atty: FloatPtr = grads_acts.atty.unsafe_offset(l * B * T * C)
+            var dl_preatt: FloatPtr = grads_acts.preatt.unsafe_offset(l * B * NH * T * T)
+            var dl_att: FloatPtr = grads_acts.att.unsafe_offset(l * B * NH * T * T)
+            var dl_attproj: FloatPtr = grads_acts.attproj.unsafe_offset(l * B * T * C)
+            var dl_residual2: FloatPtr = grads_acts.residual2.unsafe_offset(l * B * T * C)
+            var dl_ln2: FloatPtr = grads_acts.ln2.unsafe_offset(l * B * T * C)
+            var dl_fch: FloatPtr = grads_acts.fch.unsafe_offset(l * B * T * 4 * C)
+            var dl_fch_gelu: FloatPtr = grads_acts.fch_gelu.unsafe_offset(l * B * T * 4 * C)
+            var dl_fcproj: FloatPtr = grads_acts.fcproj.unsafe_offset(l * B * T * C)
+            var dl_residual3: FloatPtr = grads_acts.residual3.unsafe_offset(l * B * T * C)
 
             # backprop this layer
             residual_backward(dl_residual2, dl_fcproj, dl_residual3, B * T * C)
@@ -1591,7 +1537,6 @@ struct GPT2:
             C,
         )
 
-
     def update(
         mut self,
         learning_rate: FLOAT,
@@ -1605,11 +1550,11 @@ struct GPT2:
 
         # lazily allocate the memory for m_memory and v_memory
         if not self.m_memory:
-            self.m_memory = alloc[Scalar[dtype]](self.num_parameters)
-            self.v_memory = alloc[Scalar[dtype]](self.num_parameters)
+            self.m_memory = unsafe_alloc[Scalar[dtype]](self.num_parameters)
+            self.v_memory = unsafe_alloc[Scalar[dtype]](self.num_parameters)
 
-            memset_zero(self.m_memory.value(), self.num_parameters)
-            memset_zero(self.v_memory.value(), self.num_parameters)
+            unsafe_memset_zero(self.m_memory.value(), self.num_parameters)
+            unsafe_memset_zero(self.v_memory.value(), self.num_parameters)
 
         # local copies of the pointers for the update loop
         var params_memory = self.params_memory
@@ -1621,19 +1566,34 @@ struct GPT2:
 
         @parameter
         def _calc(ip: Int):
-            def _op[width: Int](_iv: Int) {ip, num_vectorize, params_memory, grads_memory, m_memory, v_memory, learning_rate, beta1, beta2, eps, weight_decay, t}:
+            def _op[
+                width: Int
+            ](_iv: Int) {
+                ip,
+                num_vectorize,
+                params_memory,
+                grads_memory,
+                m_memory,
+                v_memory,
+                learning_rate,
+                beta1,
+                beta2,
+                eps,
+                weight_decay,
+                t,
+            }:
                 var iv = ip * num_vectorize + _iv
-                var param = params_memory.load[width=width](iv)
-                var grad = grads_memory.load[width=width](iv)
+                var param = params_memory.unsafe_load[width=width](iv)
+                var grad = grads_memory.unsafe_load[width=width](iv)
 
                 # update the first moment (momentum)
                 var m = (
-                    beta1 * m_memory.load[width=width](iv)
+                    beta1 * m_memory.unsafe_load[width=width](iv)
                     + (1.0 - beta1) * grad
                 )
                 # update the second moment (RMSprop)
                 var v = (
-                    beta2 * v_memory.load[width=width](iv)
+                    beta2 * v_memory.unsafe_load[width=width](iv)
                     + (1.0 - beta2) * grad * grad
                 )
                 # bias-correct both moments
@@ -1641,36 +1601,37 @@ struct GPT2:
                 var v_hat = v / (1.0 - pow(beta2, t))
 
                 # update
-                m_memory.store(iv, m)
-                v_memory.store(iv, v)
-                params_memory.store(
+                m_memory.unsafe_store(iv, m)
+                v_memory.unsafe_store(iv, v)
+                params_memory.unsafe_store(
                     iv,
-                    params_memory.load[width=width](iv)
+                    params_memory.unsafe_load[width=width](iv)
                     - learning_rate
                     * (m_hat / (sqrt(v_hat) + eps) + weight_decay * param),
                 )
 
-            vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](num_vectorize, _op)
+            vectorize[SIMD_WIDTH, unroll_factor=UNROLL_FACTOR](
+                num_vectorize, _op
+            )
 
         parallelize[_calc](NUM_PARALLELIZE)
 
-
-    def __del__(deinit self):
-        self.params_memory.free()
+    def __deinit__(deinit self):
+        self.params_memory.unsafe_free()
         if self.grads:
-            self.grads.value().params_memory.free()
+            self.grads.value().params_memory.unsafe_free()
         if self.m_memory:
-            self.m_memory.value().free()
+            self.m_memory.value().unsafe_free()
         if self.v_memory:
-            self.v_memory.value().free()
+            self.v_memory.value().unsafe_free()
         if self.acts:
-            self.acts.value().acts_memory.free()
+            self.acts.value().acts_memory.unsafe_free()
         if self.grads_acts:
-            self.grads_acts.value().acts_memory.free()
+            self.grads_acts.value().acts_memory.unsafe_free()
         if self.inputs:
-            self.inputs.value().free()
+            self.inputs.value().unsafe_free()
         if self.targets:
-            self.targets.value().free()
+            self.targets.value().unsafe_free()
 
 
 # ifndef TESTING
@@ -1716,9 +1677,7 @@ struct DataLoader[B: Int, T: Int]:
         self.inputs = self.batch.unsafe_ptr().unsafe_origin_cast[
             MutUntrackedOrigin
         ]()
-        self.targets = (
-            self.inputs + 1
-        )  # targets are shifted by one
+        self.targets = self.inputs.unsafe_offset(1)  # targets are shifted by one
         self.num_batches = self.file_size // (Self.B * Self.T * SIZEOF_INT)
 
     def reset(mut self):
@@ -1733,7 +1692,7 @@ struct DataLoader[B: Int, T: Int]:
             self.current_position = 0
 
         # read the B*T+1 integers from the file into batch
-        _ = self.tokens_file.seek(UInt64(self.current_position))
+        _ = self.tokens_file.seek(Int(self.current_position))
 
         read_to_buf(self.batch, self.tokens_file)
 
@@ -1759,14 +1718,12 @@ def random_f32(mut state: UInt64) -> Float32:
     return (random_u32(state) >> 8).cast[DType.float32]() / RF32_DIV
 
 
-def sample_mult(
-    probabilities: FloatPtr, n: Int, coin: FLOAT
-) -> Int:
+def sample_mult(probabilities: FloatPtr, n: Int, coin: FLOAT) -> Int:
     # sample index from probabilities (they must sum to 1!)
     # coin is a random number in [0, 1), usually from random_f32()
     var cdf: FLOAT = 0.0
     for i in range(n):
-        cdf += probabilities[i]
+        cdf += probabilities[unsafe_offset=i]
         if coin < cdf:
             return i
     return n - 1
@@ -1861,16 +1818,21 @@ def read_to_buf[
 def read_to_dtype_pointer[
     T: DType
 ](
-    ptr: UnsafePointer[Scalar[T], MutUntrackedOrigin], file_handle: FileHandle, size: Int
+    ptr: Pointer[Scalar[T], MutUntrackedOrigin],
+    file_handle: FileHandle,
+    size: Int,
 ) raises -> None:
     # Read directly into the pointer using read_bytes
     var bytes_to_read = size * size_of[Scalar[T]]()
     var bytes_data = file_handle.read_bytes(bytes_to_read)
-    memcpy(
-        dest=ptr.bitcast[UInt8](),
+    unsafe_memcpy(
+        dest=ptr.unsafe_bitcast[UInt8](),
         src=bytes_data.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin](),
         count=bytes_to_read,
     )
+    # keep bytes_data alive past the copy: unsafe_ptr() does not extend its
+    # lifetime, and ASAP destruction would free it mid-memcpy
+    _ = bytes_data
 
 
 # ----------------------------------------------------------------------------
@@ -1912,7 +1874,7 @@ def main() raises:
     # some memory for generating samples from the model
     var rng_state: UInt64 = 1337
     var gen_max_length: Int = 64
-    var gen_tokens = alloc[Scalar[dtype_int]](gen_max_length)
+    var gen_tokens = unsafe_alloc[Scalar[dtype_int]](gen_max_length)
 
     # train
 
@@ -1934,7 +1896,7 @@ def main() raises:
         # once in a while do model inference to prgenerated INT32 text
         if step > 0 and step % 20 == 0:
             gen_tokens[
-                0
+                unsafe_offset=0
             ] = GPT2_EOT  # the GPT-2 EOT token kicks off the generation
 
             print("generating:\n---")
@@ -1944,15 +1906,14 @@ def main() raises:
                 # leaving this alone because you want separate code for inference anyway
                 # the inference here is just for sanity checking purposes
                 model.forward(gen_tokens, None, 1, t)
-                var probs = (
-                    model.acts.value().probs
-                    + (t - 1) * model.config.padded_vocab_size
+                var probs = model.acts.value().probs.unsafe_offset(
+                    (t - 1) * model.config.padded_vocab_size
                 )
                 var coin: FLOAT = random_f32(rng_state).cast[dtype]()
                 var next_token: Int = sample_mult(
                     probs, model.config.vocab_size, coin
                 )
-                gen_tokens[t] = INT(next_token)
+                gen_tokens[unsafe_offset=t] = INT(next_token)
                 # print the generated token, either using the Tokenizer or a fallback
                 if tokenizer.init_ok:
                     var token_str: String = tokenizer.decode(next_token)
@@ -1974,12 +1935,17 @@ def main() raises:
         model.backward()
         model.update(1e-4, 0.9, 0.999, 1e-8, 0.0, step + 1)
 
-        var elapsed_time_ms = Float64(perf_counter_ns() - start_time) / 1_000_000.0
+        var elapsed_time_ms = (
+            Float64(perf_counter_ns() - start_time) / 1_000_000.0
+        )
 
         elapsed_time_ms_total += elapsed_time_ms
 
         var tokens_per_second = Float64(B * T) * 1000.0 / elapsed_time_ms
 
         print(
-            t"step {step}: train loss {model.mean_loss} (took {Int(elapsed_time_ms)} ms, average: {Int(elapsed_time_ms_total / Float64(step + 1))} ms, {Int(tokens_per_second)} tok/s)"
+            t"step {step}: train loss {model.mean_loss} (took"
+            t" {Int(elapsed_time_ms)} ms, average:"
+            t" {Int(elapsed_time_ms_total / Float64(step + 1))} ms,"
+            t" {Int(tokens_per_second)} tok/s)"
         )

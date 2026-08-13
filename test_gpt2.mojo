@@ -1,7 +1,11 @@
 from std.collections import InlineArray
 from std.time import perf_counter_ns
 from std.sys.info import size_of
-from std.memory import UnsafePointer, alloc, memcpy
+from std.memory import (
+    Pointer,
+    unsafe_memcpy,
+)
+from std.memory.alloc import unsafe_alloc
 
 
 from train_gpt2 import GPT2, ParameterTensors
@@ -12,8 +16,8 @@ comptime FLOAT = SIMD[dtype, 1]
 comptime dtype_int = DType.int32
 comptime INT = SIMD[dtype_int, 1]
 
-comptime FloatPtr = UnsafePointer[Scalar[dtype], MutUntrackedOrigin]
-comptime IntPtr = UnsafePointer[Scalar[dtype_int], MutUntrackedOrigin]
+comptime FloatPtr = Pointer[Scalar[dtype], MutUntrackedOrigin]
+comptime IntPtr = Pointer[Scalar[dtype_int], MutUntrackedOrigin]
 
 comptime SIZEOF_INT = size_of[DType.int32]()
 comptime SIZEOF_FLOAT = size_of[DType.float32]()
@@ -35,7 +39,7 @@ def check_tensor(
 
     for i in range(n):
         # look at the diffence at position i of these two tensors
-        var diff = abs(a[i] - b[i])
+        var diff = abs(a[unsafe_offset=i] - b[unsafe_offset=i])
 
         # keep track of the overall error
         ok = ok and (diff <= tol)
@@ -53,7 +57,7 @@ def check_tensor(
                 if i < print_upto:
                     print("NOT OK ", end="")
 
-            print(a[i], b[i])
+            print(a[unsafe_offset=i], b[unsafe_offset=i])
 
     # prvar the:Int final result
     if ok:
@@ -66,16 +70,19 @@ def check_tensor(
 def read_to_dtype_pointer[
     T: DType
 ](
-    ptr: UnsafePointer[Scalar[T], MutUntrackedOrigin], file_handle: FileHandle, size: Int
+    ptr: Pointer[Scalar[T], MutUntrackedOrigin], file_handle: FileHandle, size: Int
 ) raises -> None:
     # Read directly into the pointer using read_bytes
     var bytes_to_read = size * size_of[Scalar[T]]()
     var bytes_data = file_handle.read_bytes(bytes_to_read)
-    memcpy(
-        dest=ptr.bitcast[UInt8](),
+    unsafe_memcpy(
+        dest=ptr.unsafe_bitcast[UInt8](),
         src=bytes_data.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin](),
         count=bytes_to_read,
     )
+    # keep bytes_data alive past the copy: unsafe_ptr() does not extend its
+    # lifetime, and ASAP destruction would free it mid-memcpy
+    _ = bytes_data
 
 
 def main() raises:
@@ -91,17 +98,17 @@ def main() raises:
 
     var state_file = open("gpt2_124M_debug_state.bin", "r")
 
-    var state_header = alloc[Scalar[dtype_int]](256)
+    var state_header = unsafe_alloc[Scalar[dtype_int]](256)
     read_to_dtype_pointer[DType.int32](state_header, state_file, 256)
 
-    if state_header[0] != 20240327:
-        raise Error(t"Bad magic state file {state_header[0]}")
-    if state_header[1] != 2:
-        raise Error(t"Bad version in state file {state_header[1]}")
+    if state_header[unsafe_offset=0] != 20240327:
+        raise Error(t"Bad magic state file {state_header[unsafe_offset=0]}")
+    if state_header[unsafe_offset=1] != 2:
+        raise Error(t"Bad version in state file {state_header[unsafe_offset=1]}")
 
-    var B: Int = Int(state_header[2])  # batch size, e.g. 4
+    var B: Int = Int(state_header[unsafe_offset=2])  # batch size, e.g. 4
     var T: Int = Int(
-        state_header[3]
+        state_header[unsafe_offset=3]
     )  # time / sequence length (e.g. 64, up to maxT)
 
     print("[State]")
@@ -113,11 +120,11 @@ def main() raises:
 
     # inputs and expected outputs, only used for error checking
 
-    var x = alloc[Scalar[dtype_int]](B * T)
-    var y = alloc[Scalar[dtype_int]](B * T)
+    var x = unsafe_alloc[Scalar[dtype_int]](B * T)
+    var y = unsafe_alloc[Scalar[dtype_int]](B * T)
 
-    var expected_logits = alloc[Scalar[dtype]](B * T * V)
-    var expected_loss = alloc[Scalar[dtype]](1)
+    var expected_logits = unsafe_alloc[Scalar[dtype]](B * T * V)
+    var expected_loss = unsafe_alloc[Scalar[dtype]](1)
 
     # read reference information from Python
 
@@ -170,11 +177,11 @@ def main() raises:
 
             for i in range(B * T * V):
                 if i < 3:
-                    print(expected_logits[i], acts.logits[i])
+                    print(expected_logits[unsafe_offset=i], acts.logits[unsafe_offset=i])
 
-                if abs(expected_logits[i] - acts.logits[i]) >= 1e-2:
+                if abs(expected_logits[unsafe_offset=i] - acts.logits[unsafe_offset=i]) >= 1e-2:
                     print("MISMATCH AT INDEX " + String(i) + ":")
-                    print(expected_logits[i], acts.logits[i])
+                    print(expected_logits[unsafe_offset=i], acts.logits[unsafe_offset=i])
                     logits_ok = False
                     break
 
@@ -184,11 +191,11 @@ def main() raises:
             allok = allok and logits_ok
 
             # compare the achieved loss
-            if abs(model.mean_loss - expected_loss[0]) >= 1e-2:
-                print("LOSS MISMATCH:", model.mean_loss, expected_loss[0])
+            if abs(model.mean_loss - expected_loss[unsafe_offset=0]) >= 1e-2:
+                print("LOSS MISMATCH:", model.mean_loss, expected_loss[unsafe_offset=0])
                 allok = False
             else:
-                print("LOSS OK:", model.mean_loss, expected_loss[0])
+                print("LOSS OK:", model.mean_loss, expected_loss[unsafe_offset=0])
 
             # finally check all the gradients
             var gradoks = InlineArray[Bool, 16](fill=False)
@@ -270,8 +277,8 @@ def main() raises:
     print("overall okay:", allok)
 
     # free everything
-    x.free()
-    y.free()
-    expected_logits.free()
-    expected_loss.free()
-    expected_grads_memory.free()
+    x.unsafe_free()
+    y.unsafe_free()
+    expected_logits.unsafe_free()
+    expected_loss.unsafe_free()
+    expected_grads_memory.unsafe_free()

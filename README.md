@@ -4,8 +4,8 @@ This project is a port of Andrej Karpathy's [llm.c](https://github.com/karpathy/
 
 **Notes:**
 
+- llm.mojo requires **Mojo 1.0** (pinned to Mojo 1.0.0 and `max` 26.5.0 in `pixi.toml`).
 - llm.mojo is a port of an earlier (2024) version of llm.c ([train_gpt2.c @ 2d43e5b](https://github.com/karpathy/llm.c/blob/2d43e5b/train_gpt2.c)), not the current upstream. llm.c has since optimized its CPU matmul (register tiling in `matmul_forward`).
-- We are preparing this repo for the upcoming Mojo 1.0 release — work in progress; it currently builds against the Mojo 1.0.0b2 beta.
 
 ## Prerequisite
 
@@ -67,7 +67,7 @@ We ported `test_gpt2.c` from the original repository to Mojo to validate our por
 
 llm.mojo began in 2024 as a response to Karpathy's then newly released [llm.c](https://github.com/karpathy/llm.c). Its purpose was to show that Mojo could implement the same low-level, C-style program — raw pointers, manual memory management — while matching its performance.
 
-Sustained interest in the repo has kept us updating it to track new Mojo releases, without expanding its scope. In that same spirit, our next planned milestone is a port to **Mojo 1.0**. Beyond 1.0 we have no concrete plans to develop the project further.
+Sustained interest in the repo has kept us updating it to track new Mojo releases, without expanding its scope. Beyond 1.0 we have no concrete plans to develop the project further.
 
 We occasionally weighed adding GPU support. That ground is now well covered by [ulmentflam/llm.mojo](https://github.com/ulmentflam/llm.mojo), a GPU-accelerated port built on hand-written CUDA and Metal kernels via MAX.
 

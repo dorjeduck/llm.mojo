@@ -1,5 +1,8 @@
 # Changelog
 
+- 2026.08.13
+  - Update to Mojo 1.0.0 (`max` 26.5.0 added as a dependency for `parallelize`, `UnsafePointer` → `Pointer`, `unsafe_` prefixes on load/store/offset/alloc/free/memcpy/memset_zero/bitcast, `p[i]` → `p[unsafe_offset=i]`, `__del__` → `__deinit__`)
+  - Fixed a use-after-free in `read_to_dtype_pointer`: `unsafe_ptr()` does not extend the byte buffer's lifetime, so ASAP destruction freed it mid-copy
 - 2026.07.17
   - Added CPU variants (V1, V2) leaning on MAX's `linalg` GEMM kernel, with a benchmark comparison — see [variants.md](variants.md)
 - 2026.07.11
