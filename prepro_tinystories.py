@@ -22,7 +22,7 @@ import json
 import random
 import requests
 from tqdm import tqdm
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor
 
 import tiktoken
 import numpy as np
@@ -104,7 +104,7 @@ def tokenize():
         with ProcessPoolExecutor() as executor:
             futures = [executor.submit(process_shard, shard_index, shard_filename)
                        for shard_index, shard_filename in enumerate(split_shards)]
-            for future in as_completed(futures):
+            for future in futures:
                 all_tokens.extend(future.result())
 
         all_tokens_np = np.array(all_tokens, dtype=np.int32)

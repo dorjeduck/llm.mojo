@@ -23,7 +23,7 @@ python prepro_tinyshakespeare.py
 Alternatively, download and tokenize the larger [TinyStories](https://huggingface.co/datasets/roneneldan/TinyStories) dataset with the following command:
 
 ```bash
-python prepro_tinystory.py
+python prepro_tinystories.py
 ```
 
 ### Step 3: Download the weights
